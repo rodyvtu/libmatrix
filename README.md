@@ -1,4 +1,4 @@
-libmatrix
+Libmatrix
 =========
 
-Trilinos-based matrix backend
+Trilinos-based matrix backend. In development.
