@@ -94,16 +94,16 @@ class InterComm( object ):
 def bcast_token( func ):
   token = _tokenmap[ func.func_name ]
   def wrapped( self, *args, **kwargs ):
-    assert self.isconnected(), 'connection is closed'
-    self.bcast( token, str )
+    assert self.comm.isconnected(), 'connection is closed'
+    self.comm.bcast( token, str )
     return func( self, *args, **kwargs )
   return wrapped
   
 
-class Map( InterComm ):
+class Map( object ):
 
   def __init__( self, comm, size, globs ):
-    InterComm.__init__( self, comm )
+    self.comm = comm
     assert len(globs) == comm.size
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
     self.handle = self.new_map( size )
@@ -112,58 +112,58 @@ class Map( InterComm ):
   def new_map( self, size ):
     lengths = map( len, self.globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
-    self.bcast( size, int )
-    self.scatter( lengths, dtype=int )
-    self.scatterv( self.globs, dtype=int )
-    return self.gather_equal( int )
+    self.comm.bcast( size, int )
+    self.comm.scatter( lengths, dtype=int )
+    self.comm.scatterv( self.globs, dtype=int )
+    return self.comm.gather_equal( int )
 
 
-class Vector( InterComm ):
+class Vector( object ):
 
   def __init__( self, comm, mp ):
-    InterComm.__init__( self, comm )
+    self.comm = comm
     assert isinstance( mp, Map )
     self.mp = mp
     self.handle = self.new_vector()
 
   @bcast_token
   def new_vector( self ):
-    self.bcast( self.mp.handle, int )
-    return self.gather_equal( int )
+    self.comm.bcast( self.mp.handle, int )
+    return self.comm.gather_equal( int )
 
   @bcast_token
   def add_evec( self, rank, idx, data ):
     n = len(idx)
     assert len(data) == n
-    self.bcast( rank, int )
-    self.send( rank, self.handle, int )
-    self.send( rank, n, int )
-    self.send( rank, idx, int )
-    self.send( rank, data, float )
+    self.comm.bcast( rank, int )
+    self.comm.send( rank, self.handle, int )
+    self.comm.send( rank, n, int )
+    self.comm.send( rank, idx, int )
+    self.comm.send( rank, data, float )
 
   @bcast_token
   def get_vector( self ):
-    self.bcast( self.handle, int )
+    self.comm.bcast( self.handle, int )
     lengths = map( len, self.mp.globs )
     array = numpy.zeros( 10 ) # TODO fix length
-    local_arrays = self.gatherv( lengths, float )
+    local_arrays = self.comm.gatherv( lengths, float )
     for idx, local_array in zip( self.mp.globs, local_arrays ):
       array[idx] += local_array
     return array
 
 
-class Matrix( InterComm ):
+class Matrix( object ):
 
   def __init__( self, comm, mp ):
-    InterComm.__init__( self, comm )
+    self.comm = comm
     assert isinstance( mp, Map )
     self.mp = mp
     self.handle = self.new_matrix()
 
   @bcast_token
   def new_matrix( self ):
-    self.bcast( self.mp.handle, int )
-    return self.gather_equal( int )
+    self.comm.bcast( self.mp.handle, int )
+    return self.comm.gather_equal( int )
 
 
 
