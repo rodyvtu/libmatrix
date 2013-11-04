@@ -21,6 +21,7 @@ class InterComm( object ):
       self.__root = MPI.ROOT
       self.__dtypemap = {
         int: ( numpy.int32, MPI.INT ),
+        long: ( numpy.int64, MPI.LONG ),
         float: ( numpy.double, MPI.DOUBLE ),
         str: ( numpy.character, MPI.CHAR ) }
     self.size = self.__comm.remote_size
@@ -115,7 +116,7 @@ class Map( object ):
     size = sum( lengths ) # TODO check meaning of size in map constructor
     self.comm.bcast( size, int )
     self.comm.scatter( lengths, dtype=int )
-    self.comm.scatterv( self.globs, dtype=int )
+    self.comm.scatterv( self.globs, dtype=long )
     return self.comm.gather_equal( int )
 
 
@@ -139,7 +140,7 @@ class Vector( object ):
     self.comm.bcast( rank, int )
     self.comm.send( rank, self.handle, int )
     self.comm.send( rank, n, int )
-    self.comm.send( rank, idx, int )
+    self.comm.send( rank, idx, long )
     self.comm.send( rank, data, float )
 
   @bcast_token
