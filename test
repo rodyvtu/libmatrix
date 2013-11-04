@@ -85,6 +85,7 @@ class InterComm( object ):
 
   def disconnect( self ):
     if self.isconnected():
+      self.bcast( '\xff', str )
       self.__comm.Disconnect()
 
   def __del__( self ):
@@ -189,9 +190,7 @@ def main():
 
   finally:
 
-    comm.bcast( '\xff', str )
     comm.disconnect()
-    comm = None
 
 
 main()
