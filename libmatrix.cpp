@@ -87,7 +87,7 @@ void new_map( MPI::Intercomm intercomm ) {
   out(intercomm) << "creating map #" << imap << " with " << ndofs << '/' << size << " items" << std::endl;
 
   Teuchos::Array<global_ordinal_type> elementList( ndofs );
-  intercomm.Scatterv( NULL, NULL, NULL, MPI::INT, (void *)elementList.getRawPtr(), ndofs, MPI::INT, 0 );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI::LONG, (void *)elementList.getRawPtr(), ndofs, MPI::LONG, 0 );
 
   Teuchos::RCP<node_type> node = Kokkos::DefaultNode::getDefaultNode ();
   Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
@@ -147,7 +147,7 @@ void add_evec( MPI::Intercomm intercomm ) {
   Teuchos::Array<global_ordinal_type> idx( nitems );
   Teuchos::Array<scalar_type> data( nitems );
 
-  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI::INT, 0, 0 );
+  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI::LONG, 0, 0 );
   intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI::DOUBLE, 0, 0 );
 
   Teuchos::RCP<vector_type> vec = VECTORS[ivec];
