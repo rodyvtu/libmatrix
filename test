@@ -182,7 +182,7 @@ class LibMatrix( InterComm ):
     return self.gather_equal( HANDLE )
 
 
-# --- user facing objects ---
+#--- user facing objects ---
 
 
 class Map( object ):
@@ -226,7 +226,7 @@ class Matrix( object ):
     self.comm.fill_complete( self.handle )
 
   def norm( self ):
-    self.comm.matrix_norm( self.handle )
+    return self.comm.matrix_norm( self.handle )
 
   def matvec( self, vec ):
     assert isinstance( vec, Vector )
@@ -245,102 +245,66 @@ class Graph( object ):
     self.handle = comm.new_graph( mp.handle, rows )
 
 
-def test1proc():
+def test( nprocs, size ):
 
-  comm = LibMatrix( nprocs=1 )
+  print 'testing on %d processors' % nprocs
+  print 'total dofs:', size
 
-  try:
+  dofs = numpy.arange( size )
+  bounds = ( (size-1) * numpy.arange( nprocs+1, dtype=float ) / nprocs ).astype( int )
+  print bounds
 
-    m = Map( comm, globs=[(0,1,2,3,4,5)] )
+  print 'dof assignments:'
+  dofmap = map( range, bounds[:-1], bounds[1:]+1 )
+  for iproc, dofs in enumerate( dofmap ):
+    print '  proc %d:' % iproc, dofs
 
-    v = Vector( comm, m )
-    v.add( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
+  block = numpy.array([[1,-1],[-1,1]])
+  print 'block:'
+  print block
 
-    print v.toarray()
+  print 'sparsity:'
+  nzmap = [ [ dofs[max(0,idof-1):idof+2] for idof in range( len(dofs) ) ] for iproc, dofs in enumerate( dofmap ) ]
+  for iproc, nz in enumerate( nzmap ):
+    print '  proc %d:' % iproc, nz
 
-    graph = Graph( comm, m, rows=[([0,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5])] )
+  comm = LibMatrix( nprocs=nprocs )
 
-    A = Matrix( comm, (10,10), graph )
-    A.add( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
+  m = Map( comm, globs=dofmap )
 
-    A.complete()
-    #A.add( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
+  v = Vector( comm, size, m )
+  for iproc, dofs in enumerate( dofmap ):
+    values = (numpy.array(dofs)+1)*10
+    values[0] /= 2
+    values[-1] /= 2
+    print 'adding', values, ' to ', dofs, ' on proc', iproc
+    v.add( rank=iproc, idx=dofs, data=values )
 
-    N = 6
-    Anumpy = numpy.eye(N,N) * 2 - numpy.eye(N,N,1) - numpy.eye(N,N,-1)
-    Anumpy[0,0] = 1
-    Anumpy[-1,-1] = 1
-    print Anumpy
-    print 'norm a:', numpy.sqrt( ( Anumpy**2 ).sum() )
-    print 'norm b:', A.norm()
+  print 'resulting vector:', v.toarray()
 
-  except:
+  graph = Graph( comm, m, rows=nzmap )
 
-    traceback.print_exc()
+  A = Matrix( comm, (size,size), graph )
+  for iproc, dofs in enumerate( dofmap ):
+    for idx in zip( dofs[:-1], dofs[1:] ):
+      print 'adding block to ', idx, ' on proc', iproc
+      A.add( rank=iproc, rowidx=idx, colidx=idx, data=block )
 
-  finally:
+  A.complete()
 
-    comm.disconnect()
+  A_npy = numpy.eye(size,size) * 2 - numpy.eye(size,size,1) - numpy.eye(size,size,-1)
+  A_npy[0,0] = A_npy[-1,-1] = 1
 
+  print 'libmatrix norm:', A.norm()
+  print 'numpy norm:', numpy.sqrt( ( A_npy**2 ).sum() )
 
-def test2proc():
+  print 'multiplying matrix and vector'
+  w = A.matvec( v )
 
-  comm = LibMatrix( nprocs=2 )
-
-  try:
-
-    m = Map( comm, globs=[(0,1,2,3,4,5),(5,6,7,8,9)] )
-
-    v = Vector( comm, 10, m )
-    v.add( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
-    v.add( rank=1, idx=[5,7], data=[10,20] )
-
-    print v.toarray()
-
-    graph = Graph( comm, m, rows=[([0,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5]),([5,6],[5,6,7],[6,7,8],[7,8,9],[8,9])] )
-
-    A = Matrix( comm, (10,10), graph )
-    A.add( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
-    A.add( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
-    A.add( rank=1, rowidx=[5,6], colidx=[5,6], data=[[1,-1],[-1,1]] )
-    A.add( rank=1, rowidx=[6,7], colidx=[6,7], data=[[1,-1],[-1,1]] )
-    A.add( rank=1, rowidx=[7,8], colidx=[7,8], data=[[1,-1],[-1,1]] )
-    A.add( rank=1, rowidx=[8,9], colidx=[8,9], data=[[1,-1],[-1,1]] )
-
-    A.complete()
-    #A.add( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
-
-    N = 10
-    Anumpy = numpy.eye(N,N) * 2 - numpy.eye(N,N,1) - numpy.eye(N,N,-1)
-    Anumpy[0,0] = 1
-    Anumpy[-1,-1] = 1
-    print Anumpy
-    print 'norm a:', numpy.sqrt( ( Anumpy**2 ).sum() )
-    print 'norm b:', A.norm()
+  print 'result:', w.toarray()
 
 
-    w = A.matvec( v )
-    print w.toarray()
-
-  except:
-
-    traceback.print_exc()
-
-  finally:
-
-    comm.disconnect()
-
-
-def main():
-
-  #test1proc()
-  test2proc()
-
-main()
+try:
+  test( nprocs=2, size=10 )
+except:
+  traceback.print_exc()
