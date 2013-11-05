@@ -77,10 +77,10 @@ inline std::ostream& out( MPI::Intercomm intercomm ) {
 
 /* NEW_MAP: create new map
    
-     -> broadcast (SIZE) map size
-     -> scatter (SIZE) number of items
-     -> scatterv (GLOBAL) items
-    <-  gather (HANDLE) map id
+     -> broadcast 1 SIZE map_size
+     -> scatter map_size SIZE number_of_items
+     -> scatterv number_of_items GLOBAL items
+    <-  gather 1 HANDLE map_handle
 */
 void new_map( MPI::Intercomm intercomm ) {
 
@@ -106,8 +106,8 @@ void new_map( MPI::Intercomm intercomm ) {
 
 /* NEW_VECTOR: create new vector
    
-     -> broadcast (HANDLE) map id
-    <-  gather (HANDLE) vector id
+     -> broadcast 1 HANDLE map_handle
+    <-  gather 1 HANDLE vector_handle
 */
 void new_vector( MPI::Intercomm intercomm ) {
 
@@ -125,12 +125,70 @@ void new_vector( MPI::Intercomm intercomm ) {
 }
 
 
+/* ADD_EVEC: add items to vector
+   
+     -> broadcast 1 SIZE rank
+   if rank == myrank
+     -> recv 1 HANDLE vector_handle
+     -> recv 1 SIZE number_of_items
+     -> recv number_of_items GLOBAL indices
+     -> recv number_of_items SCALAR values
+   endif
+*/
+void add_evec( MPI::Intercomm intercomm ) {
+
+  size_t rank;
+  intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
+
+  if ( rank != intercomm.Get_rank() ) {
+    return;
+  }
+
+  handle_t ivec;
+  intercomm.Recv( (void *)(&ivec), 1, MPI_HANDLE, 0, 0 );
+
+  size_t nitems;
+  intercomm.Recv( (void *)(&nitems), 1, MPI_SIZE, 0, 0 );
+
+  out(intercomm) << "ivec = " << ivec << ", nitems = " << nitems << std::endl;
+
+  Teuchos::ArrayRCP<global_t> idx( nitems );
+  Teuchos::ArrayRCP<scalar_t> data( nitems );
+
+  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI_GLOBAL, 0, 0 );
+  intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI_SCALAR, 0, 0 );
+
+  Teuchos::RCP<vector_t> vec = VECTORS[ivec];
+
+  for ( int i = 0; i < nitems; i++ ) {
+    out(intercomm) << idx[i] << " : " << data[i] << std::endl;
+    vec->sumIntoGlobalValue( idx[i], data[i] );
+  }
+
+}
+
+
+/* GET_VECTOR: collect vector over the intercom
+  
+     -> broadcast 1 HANDLE vector_handle
+    <-  gatherv vector.size SCALAR values
+*/
+void get_vector( MPI::Intercomm intercomm ) {
+
+  handle_t ivec;
+  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
+  Teuchos::ArrayRCP<const scalar_t> data = VECTORS[ivec]->getData();
+
+  intercomm.Gatherv( (void *)(data.get()), data.size(), MPI_SCALAR, NULL, NULL, NULL, MPI_SCALAR, 0 );
+}
+
+
 /* NEW_GRAPH: create new graph
    
-     -> broadcast (HANDLE) map id
-     -> scatterv (SIZE) ncolumns per row
-     -> scatterv (GLOBAL) columns (concatenated)
-    <-  gather (HANDLE) graph id
+     -> broadcast 1 HANDLE map_handle
+     -> scatterv 1 SIZE ncolumns_per_row
+     -> scatterv ncolumns_per_row GLOBAL columns (concatenated)
+    <-  gather 1 HANDLE graph_handle
 */
 void new_graph( MPI::Intercomm intercomm ) {
 
@@ -171,64 +229,6 @@ void new_graph( MPI::Intercomm intercomm ) {
 }
 
 
-/* ADD_EVEC: add items to vector
-   
-     -> broadcast (SIZE) rank
-   if rank == myrank
-     -> recv (HANDLE) vector id
-     -> recv (SIZE) number of items
-     -> recv (GLOBAL) indices
-     -> recv (SCALAR) values
-   endif
-*/
-void add_evec( MPI::Intercomm intercomm ) {
-
-  size_t rank;
-  intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
-
-  if ( rank != intercomm.Get_rank() ) {
-    return;
-  }
-
-  handle_t ivec;
-  intercomm.Recv( (void *)(&ivec), 1, MPI_HANDLE, 0, 0 );
-
-  size_t nitems;
-  intercomm.Recv( (void *)(&nitems), 1, MPI_SIZE, 0, 0 );
-
-  out(intercomm) << "ivec = " << ivec << ", nitems = " << nitems << std::endl;
-
-  Teuchos::ArrayRCP<global_t> idx( nitems );
-  Teuchos::ArrayRCP<scalar_t> data( nitems );
-
-  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI_GLOBAL, 0, 0 );
-  intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI_SCALAR, 0, 0 );
-
-  Teuchos::RCP<vector_t> vec = VECTORS[ivec];
-
-  for ( int i = 0; i < nitems; i++ ) {
-    out(intercomm) << idx[i] << " : " << data[i] << std::endl;
-    vec->sumIntoGlobalValue( idx[i], data[i] );
-  }
-
-}
-
-
-/* GET_VECTOR: collect vector over the intercom
-  
-     -> broadcast (HANDLE) vector id
-    <-  gatherv (SCALAR) values
-*/
-void get_vector( MPI::Intercomm intercomm ) {
-
-  handle_t ivec;
-  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
-  Teuchos::ArrayRCP<const scalar_t> data = VECTORS[ivec]->getData();
-
-  intercomm.Gatherv( (void *)(data.get()), data.size(), MPI_SCALAR, NULL, NULL, NULL, MPI_SCALAR, 0 );
-}
-
-
 /* NEW_MATRIX: create new matrix
    
      -> broadcast (HANDLE) graph id
@@ -250,6 +250,51 @@ void new_matrix( MPI::Intercomm intercomm ) {
 }
 
 
+/* ADD_EMAT: add items to matrix
+   
+     -> broadcast 1 SIZE rank
+   if rank == myrank
+     -> recv 1 HANDLE vector_handle
+     -> recv 1 SIZE number_of_rows
+     -> recv 1 SIZE number_of_rows
+     -> recv number_of_rows GLOBAL indices
+     -> recv number_of_cols GLOBAL indices
+     -> recv number_of_rows * number_of_cols SCALAR values
+   endif
+*/
+void add_emat( MPI::Intercomm intercomm ) {
+
+  size_t rank;
+  intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
+
+  if ( rank != intercomm.Get_rank() ) {
+    return;
+  }
+
+  handle_t imat;
+  intercomm.Recv( (void *)(&imat), 1, MPI_HANDLE, 0, 0 );
+
+  size_t nitems[2];
+  intercomm.Recv( (void *)nitems, 2, MPI_SIZE, 0, 0 );
+
+  out(intercomm) << "imat = " << imat << ", nitems = " << nitems[0] << "," << nitems[1] << std::endl;
+
+  Teuchos::ArrayRCP<global_t> rowidx( nitems[0] + nitems[1] ); // row + column indices
+  Teuchos::ArrayRCP<scalar_t> data( nitems[0]*nitems[1] );
+
+  intercomm.Recv( (void *)rowidx.getRawPtr(), nitems[0] + nitems[1], MPI_GLOBAL, 0, 0 );
+  intercomm.Recv( (void *)data.getRawPtr(), nitems[0]*nitems[1], MPI_SCALAR, 0, 0 );
+
+  Teuchos::RCP<matrix_t> mat = MATRICES[imat];
+
+  const Teuchos::ArrayView<const global_t> colidx = rowidx.view( nitems[0], nitems[1] );
+  for ( int i = 0; i < nitems[0]; i++ ) {
+    mat->sumIntoGlobalValues( rowidx[i], colidx, data.view(i*nitems[0],nitems[1]) );
+  }
+
+}
+
+
 /*-------------------------*
  |                         |
  |     MPI SETUP CODE      |
@@ -258,7 +303,7 @@ void new_matrix( MPI::Intercomm intercomm ) {
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS new_matrix, new_vector, add_evec, get_vector, new_map, new_graph
+#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
