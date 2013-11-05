@@ -39,11 +39,7 @@ Teuchos::Array<Teuchos::RCP<const map_t> > MAPS;
 Teuchos::Array<Teuchos::RCP<const graph_t> > GRAPHS;
 
 
-/*-------------------------*
- |                         |
- |  MISC HELPER FUNCTIONS  |
- |                         |
- *-------------------------*/
+/* MISC HELPER FUNCTIONS */
 
 
 /*
@@ -68,11 +64,7 @@ inline std::ostream& out( MPI::Intercomm intercomm ) {
 }
 
 
-/*-------------------------*
- |                         |
- |      LIBMATRIX API      |
- |                         |
- *-------------------------*/
+/* LIBMATRIX API */
 
 
 /* NEW_MAP: create new map
@@ -333,28 +325,24 @@ void matrix_norm( MPI::Intercomm intercomm ) {
    
      -> broadcast 3 HANDLE (matrix,out,vector)_handle
 */
-void matvec_inplace( MPI::Intercomm intercomm ) {
+void matvec( MPI::Intercomm intercomm ) {
 
   handle_t handles[3];
   intercomm.Bcast( (void *)handles, 3, MPI_HANDLE, 0 );
 
   Teuchos::RCP<matrix_t> matrix = MATRICES[handles[0]];
-  Teuchos::RCP<vector_t> out = VECTORS[handles[1]];
-  Teuchos::RCP<vector_t> vector = VECTORS[handles[2]];
+  Teuchos::RCP<vector_t> vector = VECTORS[handles[1]];
+  Teuchos::RCP<vector_t> out = VECTORS[handles[2]];
 
-  matrix->apply( *out, *vector );
+  matrix->apply( *vector, *out );
 }
 
 
-/*-------------------------*
- |                         |
- |     MPI SETUP CODE      |
- |                         |
- *-------------------------*/
+/* MPI SETUP CODE */
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec_inplace
+#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))

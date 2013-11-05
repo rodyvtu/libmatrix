@@ -40,6 +40,12 @@ def test( nprocs, size ):
 
   print 'resulting vector:', v.toarray()
 
+  v_npy = numpy.arange(1,size+1) * 10
+  v_npy[0] /= 2
+  v_npy[1] /= 2
+
+  print 'reference vector:', v.toarray()
+
   graph = libmatrix.Graph( comm, m, rows=nzmap )
 
   A = libmatrix.Matrix( comm, (size,size), graph )
@@ -54,12 +60,13 @@ def test( nprocs, size ):
   A_npy[0,0] = A_npy[-1,-1] = 1
 
   print 'libmatrix norm:', A.norm()
-  print 'numpy norm:', numpy.sqrt( ( A_npy**2 ).sum() )
+  print 'reference norm:', numpy.sqrt( ( A_npy**2 ).sum() )
 
   print 'multiplying matrix and vector'
   w = A.matvec( v )
 
-  print 'result:', w.toarray()
+  print 'libmatrix result:', w.toarray()
+  print 'reference result:', numpy.dot( A_npy, v_npy )
 
 
 try:

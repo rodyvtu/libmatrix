@@ -99,8 +99,8 @@ class LibMatrix( InterComm ):
     return self.gather_equal( SCALAR )
 
   @bcast_token
-  def matvec_inplace( self, matrix_handle, out_handle, vec_handle ):
-    self.bcast( [ matrix_handle, out_handle, vec_handle ], HANDLE )
+  def matvec( self, matrix_handle, vec_handle, out_handle ):
+    self.bcast( [ matrix_handle, vec_handle, out_handle ], HANDLE )
 
   @bcast_token
   def new_graph( self, map_handle, rows ):
@@ -166,7 +166,7 @@ class Matrix( object ):
     assert isinstance( vec, Vector )
     assert self.shape[1] == vec.size
     out = Vector( self.comm, self.shape[0], self.graph.mp )
-    self.comm.matvec_inplace( self.handle, out.handle, vec.handle )
+    self.comm.matvec( self.handle, vec.handle, out.handle )
     return out
 
 
