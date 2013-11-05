@@ -10,20 +10,15 @@ _tokenmap = { n: chr(i) for i, n in enumerate( _funcdata.strip()[1:-1].split( ',
 class InterComm( object ):
 
   def __init__( self, nprocs ):
-    if isinstance( nprocs, InterComm ):
-      self.__comm = nprocs.__comm
-      self.__root = nprocs.__root
-      self.__dtypemap = nprocs.__dtypemap
-    else:
-      from mpi4py import MPI
-      self.__comm = MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
-      assert self.__comm.remote_size == nprocs
-      self.__root = MPI.ROOT
-      self.__dtypemap = {
-        int: ( numpy.int32, MPI.INT ),
-        long: ( numpy.int64, MPI.LONG ),
-        float: ( numpy.double, MPI.DOUBLE ),
-        str: ( numpy.character, MPI.CHAR ) }
+    from mpi4py import MPI
+    self.__comm = MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
+    assert self.__comm.remote_size == nprocs
+    self.__root = MPI.ROOT
+    self.__dtypemap = {
+      int: ( numpy.int32, MPI.INT ),
+      long: ( numpy.int32, MPI.INT ),
+      float: ( numpy.double, MPI.DOUBLE ),
+      str: ( numpy.character, MPI.CHAR ) }
     self.size = self.__comm.remote_size
 
   def isconnected( self ):
@@ -156,17 +151,34 @@ class Vector( object ):
 
 class Matrix( object ):
 
-  def __init__( self, comm, mp ):
+  def __init__( self, comm, graph ):
     self.comm = comm
-    assert isinstance( mp, Map )
-    self.mp = mp
+    assert isinstance( graph, Graph )
+    self.graph = graph
     self.handle = self.new_matrix()
 
   @bcast_token
   def new_matrix( self ):
-    self.comm.bcast( self.mp.handle, int )
+    self.comm.bcast( self.graph.handle, int )
     return self.comm.gather_equal( int )
 
+
+class Graph( object ):
+
+  def __init__( self, comm, mp, rows ):
+    self.comm = comm
+    assert isinstance( mp, Map )
+    self.mp = mp
+    self.handle = self.new_graph( rows )
+
+  @bcast_token
+  def new_graph( self, rows ):
+    self.comm.bcast( self.mp.handle, int )
+    numcols = [ map( len, row ) for row in rows ]
+    self.comm.scatterv( numcols, int )
+    cols = [ numpy.concatenate( row ) for row in rows ]
+    self.comm.scatterv( cols, long )
+    return self.comm.gather_equal( int )
 
 
 def main():
@@ -183,7 +195,9 @@ def main():
 
     print v.get_vector()
 
-    A = Matrix( comm, m )
+    graph = Graph( comm, m, rows=[([0,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5]),([5,6],[5,6,7],[6,7,8],[7,8,9],[8,9])] )
+
+    A = Matrix( comm, graph )
 
   except:
 
