@@ -13,22 +13,30 @@
 
 Teuchos::oblackholestream blackHole;
 
-typedef double scalar_type;
-typedef int local_ordinal_type;
-typedef long global_ordinal_type;
-typedef Kokkos::DefaultNode::DefaultNodeType node_type;
-typedef Tpetra::Map<local_ordinal_type, global_ordinal_type, node_type> map_type;
-typedef Tpetra::Vector<scalar_type, local_ordinal_type, global_ordinal_type, node_type> vector_type;
-typedef Tpetra::CrsMatrix<scalar_type, local_ordinal_type, global_ordinal_type> matrix_type;
-typedef Tpetra::CrsGraph<local_ordinal_type, global_ordinal_type, node_type> graph_type;
+typedef double scalar_t;
+typedef int handle_t;
+typedef int local_t;
+typedef long global_t;
 
+// matching mpi types
+const MPI::Datatype MPI_SCALAR = MPI::DOUBLE;
+const MPI::Datatype MPI_HANDLE = MPI::INT;
+const MPI::Datatype MPI_SIZE = MPI::INT;
+const MPI::Datatype MPI_LOCAL = MPI::INT;
+const MPI::Datatype MPI_GLOBAL = MPI::LONG;
 
-const global_ordinal_type indexBase = 0;
+typedef Kokkos::DefaultNode::DefaultNodeType node_t;
+typedef Tpetra::Map<local_t, global_t, node_t> map_t;
+typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
+typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t> matrix_t;
+typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
 
-Teuchos::Array< Teuchos::RCP<vector_type> > VECTORS;
-Teuchos::Array< Teuchos::RCP<matrix_type> > MATRICES;
-Teuchos::Array< Teuchos::RCP<const map_type> > MAPS;
-Teuchos::Array< Teuchos::RCP<const graph_type> > GRAPHS;
+const global_t indexBase = 0;
+
+Teuchos::Array<Teuchos::RCP<vector_t> > VECTORS;
+Teuchos::Array<Teuchos::RCP<matrix_t> > MATRICES;
+Teuchos::Array<Teuchos::RCP<const map_t> > MAPS;
+Teuchos::Array<Teuchos::RCP<const graph_t> > GRAPHS;
 
 
 /*-------------------------*
@@ -38,6 +46,7 @@ Teuchos::Array< Teuchos::RCP<const graph_type> > GRAPHS;
  *-------------------------*/
 
 
+/*
 bool verify( bool good, const char *msg, MPI::Intercomm intercomm ) {
   int status = good ? 0 : strlen( msg );
   intercomm.Gather( (void *)(&status), 1, MPI::INT, NULL, 1, MPI::INT, 0 );
@@ -46,6 +55,7 @@ bool verify( bool good, const char *msg, MPI::Intercomm intercomm ) {
   }
   return good;
 }
+*/
 
 
 inline std::ostream& out( MPI::Intercomm intercomm ) {
@@ -67,86 +77,86 @@ inline std::ostream& out( MPI::Intercomm intercomm ) {
 
 /* NEW_MAP: create new map
    
-     -> broadcast map size
-     -> scatter number of items
-     -> scatterv items
-    <-  gather map id
+     -> broadcast (SIZE) map size
+     -> scatter (SIZE) number of items
+     -> scatterv (GLOBAL) items
+    <-  gather (HANDLE) map id
 */
 void new_map( MPI::Intercomm intercomm ) {
 
-  int imap = MAPS.size();
+  handle_t imap = MAPS.size();
 
-  int size, ndofs;
-  intercomm.Bcast( (void *)(&size), 1, MPI::INT, 0 );
-  intercomm.Scatter( NULL, 1, MPI::INT, (void *)(&ndofs), 1, MPI::INT, 0 );
+  size_t size, ndofs;
+  intercomm.Bcast( (void *)(&size), 1, MPI_SIZE, 0 );
+  intercomm.Scatter( NULL, 1, MPI_SIZE, (void *)(&ndofs), 1, MPI_SIZE, 0 );
 
   out(intercomm) << "creating map #" << imap << " with " << ndofs << '/' << size << " items" << std::endl;
 
-  Teuchos::Array<global_ordinal_type> elementList( ndofs );
-  intercomm.Scatterv( NULL, NULL, NULL, MPI::LONG, (void *)elementList.getRawPtr(), ndofs, MPI::LONG, 0 );
+  Teuchos::Array<global_t> elementList( ndofs );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI_GLOBAL, (void *)elementList.getRawPtr(), ndofs, MPI_GLOBAL, 0 );
 
-  Teuchos::RCP<node_type> node = Kokkos::DefaultNode::getDefaultNode ();
+  Teuchos::RCP<node_t> node = Kokkos::DefaultNode::getDefaultNode ();
   Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
 
-  MAPS.push_back( Teuchos::rcp( new map_type( size, elementList, indexBase, comm, node ) ) );
+  MAPS.push_back( Teuchos::rcp( new map_t( size, elementList, indexBase, comm, node ) ) );
 
-  intercomm.Gather( (void *)(&imap), 1, MPI::INT, NULL, 1, MPI::INT, 0 );
+  intercomm.Gather( (void *)(&imap), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
 
 
 /* NEW_VECTOR: create new vector
    
-     -> broadcast map id
-    <-  gather vector id
+     -> broadcast (HANDLE) map id
+    <-  gather (HANDLE) vector id
 */
 void new_vector( MPI::Intercomm intercomm ) {
 
-  int ivec = VECTORS.size();
+  handle_t ivec = VECTORS.size();
 
-  int imap;
-  intercomm.Bcast( (void *)(&imap), 1, MPI::INT, 0 );
-  Teuchos::RCP<const map_type> map = MAPS[imap];
+  handle_t imap;
+  intercomm.Bcast( (void *)(&imap), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<const map_t> map = MAPS[imap];
 
   out(intercomm) << "creating vector #" << ivec << " from map #" << imap << std::endl;
 
-  VECTORS.push_back( Teuchos::rcp( new vector_type( map ) ) );
+  VECTORS.push_back( Teuchos::rcp( new vector_t( map ) ) );
 
-  intercomm.Gather( (void *)(&ivec), 1, MPI::INT, NULL, 1, MPI::INT, 0 );
+  intercomm.Gather( (void *)(&ivec), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
 
 
 /* NEW_GRAPH: create new graph
    
-     -> broadcast map id
-     -> scatterv ncolumns per row
-     -> scatterv columns (concatenated)
-    <-  gather graph id
+     -> broadcast (HANDLE) map id
+     -> scatterv (SIZE) ncolumns per row
+     -> scatterv (GLOBAL) columns (concatenated)
+    <-  gather (HANDLE) graph id
 */
 void new_graph( MPI::Intercomm intercomm ) {
 
-  int igraph = GRAPHS.size();
+  handle_t igraph = GRAPHS.size();
 
-  int imap;
-  intercomm.Bcast( (void *)(&imap), 1, MPI::INT, 0 );
-  Teuchos::RCP<const map_type> map = MAPS[imap];
+  handle_t imap;
+  intercomm.Bcast( (void *)(&imap), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<const map_t> map = MAPS[imap];
 
-  int nrows = map->getNodeNumElements();
+  size_t nrows = map->getNodeNumElements();
   out(intercomm) << "creating graph #" << igraph << " from map #" << imap << " with " << nrows << " rows" << std::endl;
 
   Teuchos::ArrayRCP<const size_t> numcols( nrows );
   const size_t *numcols_ptr = numcols.getRawPtr();
 
-  intercomm.Scatterv( NULL, NULL, NULL, MPI::INT, (void *)numcols_ptr, nrows, MPI::INT, 0 );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI_SIZE, (void *)numcols_ptr, nrows, MPI_SIZE, 0 );
 
   int nitems = 0;
   for ( int irow = 0; irow < nrows; irow++ ) {
     nitems += numcols_ptr[ irow ]; // TODO check if ArrayRCP supports summation
   }
 
-  Teuchos::ArrayRCP<global_ordinal_type> items( nitems );
-  intercomm.Scatterv( NULL, NULL, NULL, MPI::LONG, (void *)items.getRawPtr(), nitems, MPI::LONG, 0 );
+  Teuchos::ArrayRCP<global_t> items( nitems );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI_GLOBAL, (void *)items.getRawPtr(), nitems, MPI_GLOBAL, 0 );
 
-  Teuchos::RCP<graph_type> graph = Teuchos::rcp( new graph_type( map, numcols ) );
+  Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( map, numcols ) );
   size_t offset = 0;
   for ( int irow = 0; irow < nrows; irow++ ) {
     size_t size = numcols_ptr[ irow ];
@@ -157,42 +167,44 @@ void new_graph( MPI::Intercomm intercomm ) {
 
   GRAPHS.push_back( graph );
 
-  intercomm.Gather( (void *)(&igraph), 1, MPI::INT, NULL, 1, MPI::INT, 0 );
+  intercomm.Gather( (void *)(&igraph), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
 
 
 /* ADD_EVEC: add items to vector
    
-     -> broadcast rank
+     -> broadcast (SIZE) rank
    if rank == myrank
-     -> recv vector id
-     -> recv number of items
-     -> recv indices
-     -> recv values
+     -> recv (HANDLE) vector id
+     -> recv (SIZE) number of items
+     -> recv (GLOBAL) indices
+     -> recv (SCALAR) values
    endif
 */
 void add_evec( MPI::Intercomm intercomm ) {
 
-  int rank;
-  intercomm.Bcast( (void *)(&rank), 1, MPI::INT, 0 );
+  size_t rank;
+  intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
 
   if ( rank != intercomm.Get_rank() ) {
     return;
   }
 
-  int ivec, nitems;
-  intercomm.Recv( (void *)(&ivec), 1, MPI::INT, 0, 0 );
-  intercomm.Recv( (void *)(&nitems), 1, MPI::INT, 0, 0 );
+  handle_t ivec;
+  intercomm.Recv( (void *)(&ivec), 1, MPI_HANDLE, 0, 0 );
+
+  size_t nitems;
+  intercomm.Recv( (void *)(&nitems), 1, MPI_SIZE, 0, 0 );
 
   out(intercomm) << "ivec = " << ivec << ", nitems = " << nitems << std::endl;
 
-  Teuchos::ArrayRCP<global_ordinal_type> idx( nitems );
-  Teuchos::ArrayRCP<scalar_type> data( nitems );
+  Teuchos::ArrayRCP<global_t> idx( nitems );
+  Teuchos::ArrayRCP<scalar_t> data( nitems );
 
-  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI::LONG, 0, 0 );
-  intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI::DOUBLE, 0, 0 );
+  intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI_GLOBAL, 0, 0 );
+  intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI_SCALAR, 0, 0 );
 
-  Teuchos::RCP<vector_type> vec = VECTORS[ivec];
+  Teuchos::RCP<vector_t> vec = VECTORS[ivec];
 
   for ( int i = 0; i < nitems; i++ ) {
     out(intercomm) << idx[i] << " : " << data[i] << std::endl;
@@ -204,37 +216,37 @@ void add_evec( MPI::Intercomm intercomm ) {
 
 /* GET_VECTOR: collect vector over the intercom
   
-     -> broadcast vector id
-    <-  gatherv values
+     -> broadcast (HANDLE) vector id
+    <-  gatherv (SCALAR) values
 */
 void get_vector( MPI::Intercomm intercomm ) {
 
-  int ivec;
-  intercomm.Bcast( (void *)(&ivec), 1, MPI::INT, 0 );
-  Teuchos::ArrayRCP<const scalar_type> data = VECTORS[ivec]->getData();
+  handle_t ivec;
+  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
+  Teuchos::ArrayRCP<const scalar_t> data = VECTORS[ivec]->getData();
 
-  intercomm.Gatherv( (void *)(data.get()), data.size(), MPI::DOUBLE, NULL, NULL, NULL, MPI::DOUBLE, 0 );
+  intercomm.Gatherv( (void *)(data.get()), data.size(), MPI_SCALAR, NULL, NULL, NULL, MPI_SCALAR, 0 );
 }
 
 
 /* NEW_MATRIX: create new matrix
    
-     -> broadcast graph id
-    <-  gather matrix id
+     -> broadcast (HANDLE) graph id
+    <-  gather (HANDLE) matrix id
 */
 void new_matrix( MPI::Intercomm intercomm ) {
 
-  int imat = MATRICES.size();
+  handle_t imat = MATRICES.size();
 
-  int igraph;
-  intercomm.Bcast( (void *)(&igraph), 1, MPI::INT, 0 );
-  Teuchos::RCP<const graph_type> graph = GRAPHS[igraph];
+  handle_t igraph;
+  intercomm.Bcast( (void *)(&igraph), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<const graph_t> graph = GRAPHS[igraph];
 
   out(intercomm) << "creating matrix #" << imat << " from graph #" << igraph << std::endl;
 
-  MATRICES.push_back( Teuchos::rcp( new matrix_type( graph ) ) );
+  MATRICES.push_back( Teuchos::rcp( new matrix_t( graph ) ) );
 
-  intercomm.Gather( (void *)(&imat), 1, MPI::INT, NULL, 1, MPI::INT, 0 );
+  intercomm.Gather( (void *)(&imat), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
 
 
@@ -281,14 +293,19 @@ void eventloop( char *progname ) {
 
 int main( int argc, char *argv[] ) {
 
-  if ( argc == 2 && std::strcmp( argv[1], "getfuncs" ) == 0 ) {
-    std::cout << STR(TOKENS) << '\n';
+  if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
+    std::cout << "token: enum" << STR(TOKENS) << std::endl;
+    std::cout << "local: int" << (sizeof(local_t) << 3) << std::endl;
+    std::cout << "global: int" << (sizeof(global_t) << 3) << std::endl;
+    std::cout << "size: int" << (sizeof(size_t) << 3) << std::endl;
+    std::cout << "handle: int" << (sizeof(handle_t) << 3) << std::endl;
+    std::cout << "scalar: float" << (sizeof(scalar_t) << 3) << std::endl;
   }
   else if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
     eventloop( argv[0] );
   }
   else {
-    std::cout << "syntax: " << argv[0] << " getfuncs|eventloop" << std::endl;
+    std::cout << "syntax: " << argv[0] << " info|eventloop" << std::endl;
     return 1;
   }
   return 0;

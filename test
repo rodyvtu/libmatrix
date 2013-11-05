@@ -1,38 +1,54 @@
 #! /usr/bin/python
 
 import numpy, sys, time, os, traceback
+from mpi4py import MPI
 
 
-_funcdata = os.popen( './libmatrix.mpi getfuncs' ).read()
-_tokenmap = { n: chr(i) for i, n in enumerate( _funcdata.strip()[1:-1].split( ', ' ) ) }
+typemap = {
+  'int32': (numpy.int32, MPI.INT),
+  'int64': (numpy.int64, MPI.LONG),
+  'float64': (numpy.float64, MPI.DOUBLE),
+}
+
+
+_info = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
+
+def bcast_token( func, names=_info.pop('token')[5:-1].split(', ') ):
+  token = chr( names.index( func.func_name ) )
+  def wrapped( self, *args, **kwargs ):
+    assert self.comm.isconnected(), 'connection is closed'
+    self.comm.bcast( token, TOKEN )
+    return func( self, *args, **kwargs )
+  return wrapped
+
+LOCAL  = typemap[ _info.pop('local')  ]
+GLOBAL = typemap[ _info.pop('global') ]
+HANDLE = typemap[ _info.pop('handle') ]
+SIZE   = typemap[ _info.pop('size')   ]
+SCALAR = typemap[ _info.pop('scalar') ]
+TOKEN  = numpy.character, MPI.CHAR
+
+assert not _info
+del _info
 
 
 class InterComm( object ):
 
   def __init__( self, nprocs ):
-    from mpi4py import MPI
     self.__comm = MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
     assert self.__comm.remote_size == nprocs
-    self.__root = MPI.ROOT
-    self.__dtypemap = {
-      int: ( numpy.int32, MPI.INT ),
-      long: ( numpy.int32, MPI.INT ),
-      float: ( numpy.double, MPI.DOUBLE ),
-      str: ( numpy.character, MPI.CHAR ) }
-    self.size = self.__comm.remote_size
+    self.size = nprocs
 
   def isconnected( self ):
     return bool( self.__comm )
 
-  def bcast( self, data, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def bcast( self, data, (npytype,mpitype) ):
     data = numpy.asarray( data, npytype )
-    self.__comm.Bcast( [ data, mpitype ], root=self.__root )
+    self.__comm.Bcast( [ data, mpitype ], root=MPI.ROOT )
   
-  def gather( self, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def gather( self, (npytype,mpitype) ):
     array = numpy.empty( self.size, dtype=npytype )
-    self.__comm.Gather( None, [ array, mpitype ], root=self.__root )
+    self.__comm.Gather( None, [ array, mpitype ], root=MPI.ROOT )
     return array
   
   def gather_equal( self, dtype ):
@@ -40,28 +56,24 @@ class InterComm( object ):
     assert numpy.all( array[1:] == array[0] )
     return array[0]
   
-  def scatter( self, array, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def scatter( self, array, (npytype,mpitype) ):
     array = numpy.asarray( array, dtype=npytype )
-    self.__comm.Scatter( [ array, mpitype ], None, root=self.__root )
+    self.__comm.Scatter( [ array, mpitype ], None, root=MPI.ROOT )
   
-  def scatterv( self, arrays, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def scatterv( self, arrays, (npytype,mpitype) ):
     arrays = [ numpy.asarray( array, dtype=npytype ) for array in arrays ]
     lengths = map( len, arrays )
     offsets = numpy.concatenate( [ [0], numpy.cumsum( lengths[:-1] ) ] ) # first offset = 0
     concatarray = numpy.concatenate( arrays )
-    self.__comm.Scatterv( [ concatarray, lengths, offsets, mpitype ], None, root=self.__root )
+    self.__comm.Scatterv( [ concatarray, lengths, offsets, mpitype ], None, root=MPI.ROOT )
   
-  def gatherv( self, lengths, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def gatherv( self, lengths, (npytype,mpitype) ):
     array = numpy.empty( 20, dtype=npytype )
     offsets = numpy.concatenate( [ [0], numpy.cumsum( lengths[:-1] ) ] ) # first offset = 0
-    self.__comm.Gatherv( None, [ array, lengths, offsets, mpitype ], root=self.__root )
+    self.__comm.Gatherv( None, [ array, lengths, offsets, mpitype ], root=MPI.ROOT )
     return [ array[i:i+n] for i, n in zip( offsets, lengths ) ]
   
-  def send( self, rank, array, dtype ):
-    npytype, mpitype = self.__dtypemap[dtype]
+  def send( self, rank, array, (npytype,mpitype) ):
     array = numpy.asarray( array, npytype )
     self.__comm.Send( [ array, mpitype ], rank, tag=0 )
 
@@ -81,21 +93,12 @@ class InterComm( object ):
 
   def disconnect( self ):
     if self.isconnected():
-      self.bcast( '\xff', str )
+      self.bcast( '\xff', TOKEN )
       self.__comm.Disconnect()
 
   def __del__( self ):
     self.disconnect()
 
-
-def bcast_token( func ):
-  token = _tokenmap[ func.func_name ]
-  def wrapped( self, *args, **kwargs ):
-    assert self.comm.isconnected(), 'connection is closed'
-    self.comm.bcast( token, str )
-    return func( self, *args, **kwargs )
-  return wrapped
-  
 
 class Map( object ):
 
@@ -109,10 +112,10 @@ class Map( object ):
   def new_map( self, size ):
     lengths = map( len, self.globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
-    self.comm.bcast( size, int )
-    self.comm.scatter( lengths, dtype=int )
-    self.comm.scatterv( self.globs, dtype=long )
-    return self.comm.gather_equal( int )
+    self.comm.bcast( size, SIZE )
+    self.comm.scatter( lengths, SIZE )
+    self.comm.scatterv( self.globs, GLOBAL )
+    return self.comm.gather_equal( HANDLE )
 
 
 class Vector( object ):
@@ -125,25 +128,25 @@ class Vector( object ):
 
   @bcast_token
   def new_vector( self ):
-    self.comm.bcast( self.mp.handle, int )
-    return self.comm.gather_equal( int )
+    self.comm.bcast( self.mp.handle, HANDLE )
+    return self.comm.gather_equal( HANDLE )
 
   @bcast_token
   def add_evec( self, rank, idx, data ):
     n = len(idx)
     assert len(data) == n
-    self.comm.bcast( rank, int )
-    self.comm.send( rank, self.handle, int )
-    self.comm.send( rank, n, int )
-    self.comm.send( rank, idx, long )
-    self.comm.send( rank, data, float )
+    self.comm.bcast( rank, SIZE )
+    self.comm.send( rank, self.handle, HANDLE )
+    self.comm.send( rank, n, SIZE )
+    self.comm.send( rank, idx, GLOBAL )
+    self.comm.send( rank, data, SCALAR )
 
   @bcast_token
   def get_vector( self ):
-    self.comm.bcast( self.handle, int )
+    self.comm.bcast( self.handle, HANDLE )
     lengths = map( len, self.mp.globs )
     array = numpy.zeros( 10 ) # TODO fix length
-    local_arrays = self.comm.gatherv( lengths, float )
+    local_arrays = self.comm.gatherv( lengths, SCALAR )
     for idx, local_array in zip( self.mp.globs, local_arrays ):
       array[idx] += local_array
     return array
@@ -159,8 +162,8 @@ class Matrix( object ):
 
   @bcast_token
   def new_matrix( self ):
-    self.comm.bcast( self.graph.handle, int )
-    return self.comm.gather_equal( int )
+    self.comm.bcast( self.graph.handle, HANDLE )
+    return self.comm.gather_equal( HANDLE )
 
 
 class Graph( object ):
@@ -173,12 +176,12 @@ class Graph( object ):
 
   @bcast_token
   def new_graph( self, rows ):
-    self.comm.bcast( self.mp.handle, int )
+    self.comm.bcast( self.mp.handle, HANDLE )
     numcols = [ map( len, row ) for row in rows ]
-    self.comm.scatterv( numcols, int )
+    self.comm.scatterv( numcols, SIZE )
     cols = [ numpy.concatenate( row ) for row in rows ]
-    self.comm.scatterv( cols, long )
-    return self.comm.gather_equal( int )
+    self.comm.scatterv( cols, GLOBAL )
+    return self.comm.gather_equal( HANDLE )
 
 
 def main():
