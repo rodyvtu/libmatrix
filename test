@@ -16,8 +16,8 @@ _info = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.
 def bcast_token( func, names=_info.pop('token')[5:-1].split(', ') ):
   token = chr( names.index( func.func_name ) )
   def wrapped( self, *args, **kwargs ):
-    assert self.comm.isconnected(), 'connection is closed'
-    self.comm.bcast( token, TOKEN )
+    assert self.isconnected(), 'connection is closed'
+    self.bcast( token, TOKEN )
     return func( self, *args, **kwargs )
   return wrapped
 
@@ -33,11 +33,11 @@ del _info
 
 
 class InterComm( object ):
+  'generic MPI communicator wrapper'
 
-  def __init__( self, nprocs ):
-    self.__comm = MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
-    assert self.__comm.remote_size == nprocs
-    self.size = nprocs
+  def __init__( self, comm ):
+    self.__comm = comm
+    self.size = comm.remote_size
 
   def isconnected( self ):
     return bool( self.__comm )
@@ -100,22 +100,98 @@ class InterComm( object ):
     self.disconnect()
 
 
+class LibMatrix( InterComm ):
+  'interface to all libmatrix functions'
+
+  def __init__( self, nprocs ):
+    InterComm.__init__( self, MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs ) )
+    assert self.size == nprocs
+
+  @bcast_token
+  def new_map( self, globs ):
+    lengths = map( len, globs )
+    size = sum( lengths ) # TODO check meaning of size in map constructor
+    self.bcast( size, SIZE )
+    self.scatter( lengths, SIZE )
+    self.scatterv( globs, GLOBAL )
+    return self.gather_equal( HANDLE )
+
+  @bcast_token
+  def new_vector( self, map_handle ):
+    self.bcast( map_handle, HANDLE )
+    return self.gather_equal( HANDLE )
+
+  @bcast_token
+  def add_evec( self, handle, rank, idx, data ):
+    n = len(idx)
+    assert len(data) == n
+    self.bcast( rank, SIZE )
+    self.send( rank, handle, HANDLE )
+    self.send( rank, n, SIZE )
+    self.send( rank, idx, GLOBAL )
+    self.send( rank, data, SCALAR )
+
+  @bcast_token
+  def get_vector( self, vec_handle, size, globs ):
+    self.bcast( vec_handle, HANDLE )
+    array = numpy.zeros( size ) # TODO fix length
+    lengths = map( len, globs )
+    local_arrays = self.gatherv( lengths, SCALAR )
+    for idx, local_array in zip( globs, local_arrays ):
+      array[idx] += local_array
+    return array
+
+  @bcast_token
+  def new_matrix( self, graph_handle ):
+    self.bcast( graph_handle, HANDLE )
+    return self.gather_equal( HANDLE )
+
+  @bcast_token
+  def add_emat( self, handle, rank, rowidx, colidx, data ):
+    data = numpy.asarray(data)
+    shape = len(rowidx), len(colidx)
+    assert data.shape == shape
+    self.bcast( rank, SIZE )
+    self.send( rank, handle, HANDLE )
+    self.send( rank, shape, SIZE )
+    print rowidx, colidx
+    self.send( rank, rowidx, GLOBAL )
+    self.send( rank, colidx, GLOBAL )
+    self.send( rank, data.ravel(), SCALAR )
+
+  @bcast_token
+  def fill_complete( self, handle ):
+    self.bcast( handle, HANDLE )
+
+  @bcast_token
+  def matrix_norm( self, handle ):
+    self.bcast( handle, HANDLE )
+    return self.gather_equal( SCALAR )
+
+  @bcast_token
+  def matvec_inplace( self, matrix_handle, out_handle, vec_handle ):
+    self.bcast( [ matrix_handle, out_handle, vec_handle ], HANDLE )
+
+  @bcast_token
+  def new_graph( self, map_handle, rows ):
+    self.bcast( map_handle, HANDLE )
+    numcols = [ map( len, row ) for row in rows ]
+    self.scatterv( numcols, SIZE )
+    cols = [ numpy.concatenate( row ) for row in rows ]
+    self.scatterv( cols, GLOBAL )
+    return self.gather_equal( HANDLE )
+
+
+# --- user facing objects ---
+
+
 class Map( object ):
 
   def __init__( self, comm, globs ):
     self.comm = comm
     assert len(globs) == comm.size
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
-    self.handle = self.new_map()
-
-  @bcast_token
-  def new_map( self ):
-    lengths = map( len, self.globs )
-    size = sum( lengths ) # TODO check meaning of size in map constructor
-    self.comm.bcast( size, SIZE )
-    self.comm.scatter( lengths, SIZE )
-    self.comm.scatterv( self.globs, GLOBAL )
-    return self.comm.gather_equal( HANDLE )
+    self.handle = comm.new_map( globs )
 
 
 class Vector( object ):
@@ -125,32 +201,13 @@ class Vector( object ):
     self.size = size
     assert isinstance( mp, Map )
     self.mp = mp
-    self.handle = self.new_vector()
+    self.handle = comm.new_vector( mp.handle )
 
-  @bcast_token
-  def new_vector( self ):
-    self.comm.bcast( self.mp.handle, HANDLE )
-    return self.comm.gather_equal( HANDLE )
+  def add( self, rank, idx, data ):
+    self.comm.add_evec( self.handle, rank, idx, data )
 
-  @bcast_token
-  def add_evec( self, rank, idx, data ):
-    n = len(idx)
-    assert len(data) == n
-    self.comm.bcast( rank, SIZE )
-    self.comm.send( rank, self.handle, HANDLE )
-    self.comm.send( rank, n, SIZE )
-    self.comm.send( rank, idx, GLOBAL )
-    self.comm.send( rank, data, SCALAR )
-
-  @bcast_token
-  def get_vector( self ):
-    self.comm.bcast( self.handle, HANDLE )
-    lengths = map( len, self.mp.globs )
-    array = numpy.zeros( self.size ) # TODO fix length
-    local_arrays = self.comm.gatherv( lengths, SCALAR )
-    for idx, local_array in zip( self.mp.globs, local_arrays ):
-      array[idx] += local_array
-    return array
+  def toarray( self ):
+    return self.comm.get_vector( self.handle, self.size, self.mp.globs )
 
 
 class Matrix( object ):
@@ -160,46 +217,23 @@ class Matrix( object ):
     self.shape = shape
     assert isinstance( graph, Graph )
     self.graph = graph
-    self.handle = self.new_matrix()
+    self.handle = comm.new_matrix( graph.handle )
 
-  @bcast_token
-  def new_matrix( self ):
-    self.comm.bcast( self.graph.handle, HANDLE )
-    return self.comm.gather_equal( HANDLE )
+  def add( self, rank, rowidx, colidx, data ):
+    self.comm.add_emat( self.handle, rank, rowidx, colidx, data )
 
-  @bcast_token
-  def add_emat( self, rank, rowidx, colidx, data ):
-    data = numpy.asarray(data)
-    shape = len(rowidx), len(colidx)
-    assert data.shape == shape
-    self.comm.bcast( rank, SIZE )
-    self.comm.send( rank, self.handle, HANDLE )
-    self.comm.send( rank, shape, SIZE )
-    print rowidx, colidx
-    self.comm.send( rank, rowidx, GLOBAL )
-    self.comm.send( rank, colidx, GLOBAL )
-    self.comm.send( rank, data.ravel(), SCALAR )
+  def complete( self ):
+    self.comm.fill_complete( self.handle )
 
-  @bcast_token
-  def fill_complete( self ):
-    self.comm.bcast( self.handle, HANDLE )
-
-  @bcast_token
-  def matrix_norm( self ):
-    self.comm.bcast( self.handle, HANDLE )
-    return self.comm.gather_equal( SCALAR )
+  def norm( self ):
+    self.comm.matrix_norm( self.handle )
 
   def matvec( self, vec ):
-    out = Vector( self.comm, self.shape[0], self.graph.mp )
-    self.matvec_inplace( out, vec )
-    return out
-
-  @bcast_token
-  def matvec_inplace( self, out, vec ):
     assert isinstance( vec, Vector )
-    assert isinstance( out, Vector )
-    assert self.shape == ( out.size, vec.size )
-    self.comm.bcast( [ self.handle, out.handle, vec.handle ], HANDLE )
+    assert self.shape[1] == vec.size
+    out = Vector( self.comm, self.shape[0], self.graph.mp )
+    self.comm.matvec_inplace( self.handle, out.handle, vec.handle )
+    return out
 
 
 class Graph( object ):
@@ -208,42 +242,33 @@ class Graph( object ):
     self.comm = comm
     assert isinstance( mp, Map )
     self.mp = mp
-    self.handle = self.new_graph( rows )
-
-  @bcast_token
-  def new_graph( self, rows ):
-    self.comm.bcast( self.mp.handle, HANDLE )
-    numcols = [ map( len, row ) for row in rows ]
-    self.comm.scatterv( numcols, SIZE )
-    cols = [ numpy.concatenate( row ) for row in rows ]
-    self.comm.scatterv( cols, GLOBAL )
-    return self.comm.gather_equal( HANDLE )
+    self.handle = comm.new_graph( mp.handle, rows )
 
 
 def test1proc():
 
-  comm = InterComm( nprocs=1 )
+  comm = LibMatrix( nprocs=1 )
 
   try:
 
     m = Map( comm, globs=[(0,1,2,3,4,5)] )
 
     v = Vector( comm, m )
-    v.add_evec( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
+    v.add( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
 
-    print v.get_vector()
+    print v.toarray()
 
     graph = Graph( comm, m, rows=[([0,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5])] )
 
     A = Matrix( comm, (10,10), graph )
-    A.add_emat( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
 
-    A.fill_complete()
-    #A.add_emat( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
+    A.complete()
+    #A.add( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
 
     N = 6
     Anumpy = numpy.eye(N,N) * 2 - numpy.eye(N,N,1) - numpy.eye(N,N,-1)
@@ -251,7 +276,7 @@ def test1proc():
     Anumpy[-1,-1] = 1
     print Anumpy
     print 'norm a:', numpy.sqrt( ( Anumpy**2 ).sum() )
-    print 'norm b:', A.matrix_norm()
+    print 'norm b:', A.norm()
 
   except:
 
@@ -264,33 +289,33 @@ def test1proc():
 
 def test2proc():
 
-  comm = InterComm( nprocs=2 )
+  comm = LibMatrix( nprocs=2 )
 
   try:
 
     m = Map( comm, globs=[(0,1,2,3,4,5),(5,6,7,8,9)] )
 
     v = Vector( comm, 10, m )
-    v.add_evec( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
-    v.add_evec( rank=1, idx=[5,7], data=[10,20] )
+    v.add( rank=0, idx=[1,2,4,5], data=[10,20,30,40] )
+    v.add( rank=1, idx=[5,7], data=[10,20] )
 
-    print v.get_vector()
+    print v.toarray()
 
     graph = Graph( comm, m, rows=[([0,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5]),([5,6],[5,6,7],[6,7,8],[7,8,9],[8,9])] )
 
     A = Matrix( comm, (10,10), graph )
-    A.add_emat( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=1, rowidx=[5,6], colidx=[5,6], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=1, rowidx=[6,7], colidx=[6,7], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=1, rowidx=[7,8], colidx=[7,8], data=[[1,-1],[-1,1]] )
-    A.add_emat( rank=1, rowidx=[8,9], colidx=[8,9], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[0,1], colidx=[0,1], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[1,2], colidx=[1,2], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[2,3], colidx=[2,3], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[3,4], colidx=[3,4], data=[[1,-1],[-1,1]] )
+    A.add( rank=0, rowidx=[4,5], colidx=[4,5], data=[[1,-1],[-1,1]] )
+    A.add( rank=1, rowidx=[5,6], colidx=[5,6], data=[[1,-1],[-1,1]] )
+    A.add( rank=1, rowidx=[6,7], colidx=[6,7], data=[[1,-1],[-1,1]] )
+    A.add( rank=1, rowidx=[7,8], colidx=[7,8], data=[[1,-1],[-1,1]] )
+    A.add( rank=1, rowidx=[8,9], colidx=[8,9], data=[[1,-1],[-1,1]] )
 
-    A.fill_complete()
-    #A.add_emat( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
+    A.complete()
+    #A.add( rank=0, rowidx=[1,2], colidx=[2,1], data=[[1,-1],[-1,1]] )
 
     N = 10
     Anumpy = numpy.eye(N,N) * 2 - numpy.eye(N,N,1) - numpy.eye(N,N,-1)
@@ -298,11 +323,11 @@ def test2proc():
     Anumpy[-1,-1] = 1
     print Anumpy
     print 'norm a:', numpy.sqrt( ( Anumpy**2 ).sum() )
-    print 'norm b:', A.matrix_norm()
+    print 'norm b:', A.norm()
 
 
     w = A.matvec( v )
-    print w.get_vector()
+    print w.toarray()
 
   except:
 
