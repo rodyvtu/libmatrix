@@ -255,11 +255,10 @@ void new_matrix( MPI::Intercomm intercomm ) {
      -> broadcast 1 SIZE rank
    if rank == myrank
      -> recv 1 HANDLE vector_handle
-     -> recv 1 SIZE number_of_rows
-     -> recv 1 SIZE number_of_rows
+     -> recv 2 SIZE number_of_(rows,cols)
      -> recv number_of_rows GLOBAL indices
      -> recv number_of_cols GLOBAL indices
-     -> recv number_of_rows * number_of_cols SCALAR values
+     -> recv number_of_(rows*cols) SCALAR values
    endif
 */
 void add_emat( MPI::Intercomm intercomm ) {
@@ -279,19 +278,71 @@ void add_emat( MPI::Intercomm intercomm ) {
 
   out(intercomm) << "imat = " << imat << ", nitems = " << nitems[0] << "," << nitems[1] << std::endl;
 
-  Teuchos::ArrayRCP<global_t> rowidx( nitems[0] + nitems[1] ); // row + column indices
+  Teuchos::ArrayRCP<global_t> rowidx( nitems[0] );
+  Teuchos::ArrayRCP<global_t> colidx( nitems[1] );
   Teuchos::ArrayRCP<scalar_t> data( nitems[0]*nitems[1] );
 
-  intercomm.Recv( (void *)rowidx.getRawPtr(), nitems[0] + nitems[1], MPI_GLOBAL, 0, 0 );
+  intercomm.Recv( (void *)rowidx.getRawPtr(), nitems[0], MPI_GLOBAL, 0, 0 );
+  intercomm.Recv( (void *)colidx.getRawPtr(), nitems[1], MPI_GLOBAL, 0, 0 );
   intercomm.Recv( (void *)data.getRawPtr(), nitems[0]*nitems[1], MPI_SCALAR, 0, 0 );
 
   Teuchos::RCP<matrix_t> mat = MATRICES[imat];
 
-  const Teuchos::ArrayView<const global_t> colidx = rowidx.view( nitems[0], nitems[1] );
+  const Teuchos::ArrayView<const global_t> colidx_view = colidx.view( 0, nitems[1] );
   for ( int i = 0; i < nitems[0]; i++ ) {
-    mat->sumIntoGlobalValues( rowidx[i], colidx, data.view(i*nitems[0],nitems[1]) );
+    mat->sumIntoGlobalValues( rowidx[i], colidx_view, data.view(i*nitems[0],nitems[1]) );
   }
 
+}
+
+
+/* FILL_COMPLETE: set matrix to fill-complete
+   
+     -> broadcast 1 HANDLE matrix_handle
+*/
+void fill_complete( MPI::Intercomm intercomm ) {
+
+  handle_t imat;
+  intercomm.Bcast( (void *)(&imat), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<matrix_t> matrix = MATRICES[imat];
+
+  out(intercomm) << "completing matrix #" << imat << std::endl;
+
+  matrix->fillComplete();
+}
+
+
+/* MATRIX_NORM: compute frobenius norm
+   
+     -> broadcast 1 HANDLE matrix_handle
+    <-  gather 1 SCALAR norm
+*/
+void matrix_norm( MPI::Intercomm intercomm ) {
+
+  handle_t imat;
+  intercomm.Bcast( (void *)(&imat), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<matrix_t> matrix = MATRICES[imat];
+
+  scalar_t norm = matrix->getFrobeniusNorm();
+
+  intercomm.Gather( (void *)(&norm), 1, MPI_SCALAR, NULL, 1, MPI_SCALAR, 0 );
+}
+
+
+/* MATVEC: matrix vector multiplication
+   
+     -> broadcast 3 HANDLE (matrix,out,vector)_handle
+*/
+void matvec_inplace( MPI::Intercomm intercomm ) {
+
+  handle_t handles[3];
+  intercomm.Bcast( (void *)handles, 3, MPI_HANDLE, 0 );
+
+  Teuchos::RCP<matrix_t> matrix = MATRICES[handles[0]];
+  Teuchos::RCP<vector_t> out = VECTORS[handles[1]];
+  Teuchos::RCP<vector_t> vector = VECTORS[handles[2]];
+
+  matrix->apply( *out, *vector );
 }
 
 
@@ -303,7 +354,7 @@ void add_emat( MPI::Intercomm intercomm ) {
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat
+#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec_inplace
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
