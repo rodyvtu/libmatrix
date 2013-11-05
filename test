@@ -1,248 +1,6 @@
 #! /usr/bin/python
 
-import numpy, sys, time, os, traceback
-from mpi4py import MPI
-
-
-typemap = {
-  'int32': (numpy.int32, MPI.INT),
-  'int64': (numpy.int64, MPI.LONG),
-  'float64': (numpy.float64, MPI.DOUBLE),
-}
-
-
-_info = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
-
-def bcast_token( func, names=_info.pop('token')[5:-1].split(', ') ):
-  token = chr( names.index( func.func_name ) )
-  def wrapped( self, *args, **kwargs ):
-    assert self.isconnected(), 'connection is closed'
-    self.bcast( token, TOKEN )
-    return func( self, *args, **kwargs )
-  return wrapped
-
-LOCAL  = typemap[ _info.pop('local')  ]
-GLOBAL = typemap[ _info.pop('global') ]
-HANDLE = typemap[ _info.pop('handle') ]
-SIZE   = typemap[ _info.pop('size')   ]
-SCALAR = typemap[ _info.pop('scalar') ]
-TOKEN  = numpy.character, MPI.CHAR
-
-assert not _info
-del _info
-
-
-class InterComm( object ):
-  'generic MPI communicator wrapper'
-
-  def __init__( self, comm ):
-    self.__comm = comm
-    self.size = comm.remote_size
-
-  def isconnected( self ):
-    return bool( self.__comm )
-
-  def bcast( self, data, (npytype,mpitype) ):
-    data = numpy.asarray( data, npytype )
-    self.__comm.Bcast( [ data, mpitype ], root=MPI.ROOT )
-  
-  def gather( self, (npytype,mpitype) ):
-    array = numpy.empty( self.size, dtype=npytype )
-    self.__comm.Gather( None, [ array, mpitype ], root=MPI.ROOT )
-    return array
-  
-  def gather_equal( self, dtype ):
-    array = self.gather( dtype )
-    assert numpy.all( array[1:] == array[0] )
-    return array[0]
-  
-  def scatter( self, array, (npytype,mpitype) ):
-    array = numpy.asarray( array, dtype=npytype )
-    self.__comm.Scatter( [ array, mpitype ], None, root=MPI.ROOT )
-  
-  def scatterv( self, arrays, (npytype,mpitype) ):
-    arrays = [ numpy.asarray( array, dtype=npytype ) for array in arrays ]
-    lengths = map( len, arrays )
-    offsets = numpy.concatenate( [ [0], numpy.cumsum( lengths[:-1] ) ] ) # first offset = 0
-    concatarray = numpy.concatenate( arrays )
-    self.__comm.Scatterv( [ concatarray, lengths, offsets, mpitype ], None, root=MPI.ROOT )
-  
-  def gatherv( self, lengths, (npytype,mpitype) ):
-    array = numpy.empty( 20, dtype=npytype )
-    offsets = numpy.concatenate( [ [0], numpy.cumsum( lengths[:-1] ) ] ) # first offset = 0
-    self.__comm.Gatherv( None, [ array, lengths, offsets, mpitype ], root=MPI.ROOT )
-    return [ array[i:i+n] for i, n in zip( offsets, lengths ) ]
-  
-  def send( self, rank, array, (npytype,mpitype) ):
-    array = numpy.asarray( array, npytype )
-    self.__comm.Send( [ array, mpitype ], rank, tag=0 )
-
-  def verify( self ):
-    raise NotImplementedError
-    strlen = self.gather( int )
-    good = (strlen == 0)
-    if good.all():
-      return 0
-    msgs = [ 'In libmatrix: %d errors occurred:' % (~good).sum() ]
-    for i, s in enumerate( strlen ):
-      if s:
-        x = numpy.empty( s, dtype='c' )
-        self.__comm.Recv( [x,MPI.CHAR], i, tag=10 )
-        msgs.append( '[%d] %s' % ( i, x.tostring() ) )
-    raise Exception( '\n  '.join( msgs ) )
-
-  def disconnect( self ):
-    if self.isconnected():
-      self.bcast( '\xff', TOKEN )
-      self.__comm.Disconnect()
-
-  def __del__( self ):
-    self.disconnect()
-
-
-class LibMatrix( InterComm ):
-  'interface to all libmatrix functions'
-
-  def __init__( self, nprocs ):
-    InterComm.__init__( self, MPI.COMM_SELF.Spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs ) )
-    assert self.size == nprocs
-
-  @bcast_token
-  def new_map( self, globs ):
-    lengths = map( len, globs )
-    size = sum( lengths ) # TODO check meaning of size in map constructor
-    self.bcast( size, SIZE )
-    self.scatter( lengths, SIZE )
-    self.scatterv( globs, GLOBAL )
-    return self.gather_equal( HANDLE )
-
-  @bcast_token
-  def new_vector( self, map_handle ):
-    self.bcast( map_handle, HANDLE )
-    return self.gather_equal( HANDLE )
-
-  @bcast_token
-  def add_evec( self, handle, rank, idx, data ):
-    n = len(idx)
-    assert len(data) == n
-    self.bcast( rank, SIZE )
-    self.send( rank, handle, HANDLE )
-    self.send( rank, n, SIZE )
-    self.send( rank, idx, GLOBAL )
-    self.send( rank, data, SCALAR )
-
-  @bcast_token
-  def get_vector( self, vec_handle, size, globs ):
-    self.bcast( vec_handle, HANDLE )
-    array = numpy.zeros( size ) # TODO fix length
-    lengths = map( len, globs )
-    local_arrays = self.gatherv( lengths, SCALAR )
-    for idx, local_array in zip( globs, local_arrays ):
-      array[idx] += local_array
-    return array
-
-  @bcast_token
-  def new_matrix( self, graph_handle ):
-    self.bcast( graph_handle, HANDLE )
-    return self.gather_equal( HANDLE )
-
-  @bcast_token
-  def add_emat( self, handle, rank, rowidx, colidx, data ):
-    data = numpy.asarray(data)
-    shape = len(rowidx), len(colidx)
-    assert data.shape == shape
-    self.bcast( rank, SIZE )
-    self.send( rank, handle, HANDLE )
-    self.send( rank, shape, SIZE )
-    print rowidx, colidx
-    self.send( rank, rowidx, GLOBAL )
-    self.send( rank, colidx, GLOBAL )
-    self.send( rank, data.ravel(), SCALAR )
-
-  @bcast_token
-  def fill_complete( self, handle ):
-    self.bcast( handle, HANDLE )
-
-  @bcast_token
-  def matrix_norm( self, handle ):
-    self.bcast( handle, HANDLE )
-    return self.gather_equal( SCALAR )
-
-  @bcast_token
-  def matvec_inplace( self, matrix_handle, out_handle, vec_handle ):
-    self.bcast( [ matrix_handle, out_handle, vec_handle ], HANDLE )
-
-  @bcast_token
-  def new_graph( self, map_handle, rows ):
-    self.bcast( map_handle, HANDLE )
-    numcols = [ map( len, row ) for row in rows ]
-    self.scatterv( numcols, SIZE )
-    cols = [ numpy.concatenate( row ) for row in rows ]
-    self.scatterv( cols, GLOBAL )
-    return self.gather_equal( HANDLE )
-
-
-#--- user facing objects ---
-
-
-class Map( object ):
-
-  def __init__( self, comm, globs ):
-    self.comm = comm
-    assert len(globs) == comm.size
-    self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
-    self.handle = comm.new_map( globs )
-
-
-class Vector( object ):
-
-  def __init__( self, comm, size, mp ):
-    self.comm = comm
-    self.size = size
-    assert isinstance( mp, Map )
-    self.mp = mp
-    self.handle = comm.new_vector( mp.handle )
-
-  def add( self, rank, idx, data ):
-    self.comm.add_evec( self.handle, rank, idx, data )
-
-  def toarray( self ):
-    return self.comm.get_vector( self.handle, self.size, self.mp.globs )
-
-
-class Matrix( object ):
-
-  def __init__( self, comm, shape, graph ):
-    self.comm = comm
-    self.shape = shape
-    assert isinstance( graph, Graph )
-    self.graph = graph
-    self.handle = comm.new_matrix( graph.handle )
-
-  def add( self, rank, rowidx, colidx, data ):
-    self.comm.add_emat( self.handle, rank, rowidx, colidx, data )
-
-  def complete( self ):
-    self.comm.fill_complete( self.handle )
-
-  def norm( self ):
-    return self.comm.matrix_norm( self.handle )
-
-  def matvec( self, vec ):
-    assert isinstance( vec, Vector )
-    assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.shape[0], self.graph.mp )
-    self.comm.matvec_inplace( self.handle, out.handle, vec.handle )
-    return out
-
-
-class Graph( object ):
-
-  def __init__( self, comm, mp, rows ):
-    self.comm = comm
-    assert isinstance( mp, Map )
-    self.mp = mp
-    self.handle = comm.new_graph( mp.handle, rows )
+import libmatrix, traceback, numpy
 
 
 def test( nprocs, size ):
@@ -268,11 +26,11 @@ def test( nprocs, size ):
   for iproc, nz in enumerate( nzmap ):
     print '  proc %d:' % iproc, nz
 
-  comm = LibMatrix( nprocs=nprocs )
+  comm = libmatrix.LibMatrix( nprocs=nprocs )
 
-  m = Map( comm, globs=dofmap )
+  m = libmatrix.Map( comm, globs=dofmap )
 
-  v = Vector( comm, size, m )
+  v = libmatrix.Vector( comm, size, m )
   for iproc, dofs in enumerate( dofmap ):
     values = (numpy.array(dofs)+1)*10
     values[0] /= 2
@@ -282,9 +40,9 @@ def test( nprocs, size ):
 
   print 'resulting vector:', v.toarray()
 
-  graph = Graph( comm, m, rows=nzmap )
+  graph = libmatrix.Graph( comm, m, rows=nzmap )
 
-  A = Matrix( comm, (size,size), graph )
+  A = libmatrix.Matrix( comm, (size,size), graph )
   for iproc, dofs in enumerate( dofmap ):
     for idx in zip( dofs[:-1], dofs[1:] ):
       print 'adding block to ', idx, ' on proc', iproc
