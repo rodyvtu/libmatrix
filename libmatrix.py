@@ -27,7 +27,7 @@ class LibMatrix( InterComm ):
   'interface to all libmatrix functions'
 
   def __init__( self, nprocs ):
-    self.spawn( 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
+    InterComm.__init__( self, 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
     assert self.size == nprocs
 
   @bcast_token

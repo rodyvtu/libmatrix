@@ -13,14 +13,9 @@ dtypes = {
 class InterComm( object ):
   'generic MPI communicator wrapper'
 
-  __comm = None
-
-  def spawn( self, cmd, **kwargs ):
+  def __init__( self, cmd, **kwargs ):
     self.__comm = MPI.COMM_SELF.Spawn( cmd, **kwargs )
-
-  @property
-  def size( self ):
-    return self.__comm.remote_size
+    self.size = self.__comm.remote_size
 
   def isconnected( self ):
     return bool( self.__comm )
