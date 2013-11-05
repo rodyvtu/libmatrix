@@ -1,12 +1,5 @@
 import numpy, os
-from mpi import MPI, InterComm
-
-
-typemap = {
-  'int32': (numpy.int32, MPI.INT),
-  'int64': (numpy.int64, MPI.LONG),
-  'float64': (numpy.float64, MPI.DOUBLE),
-}
+from mpi import InterComm, dtypes
 
 
 _info = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
@@ -19,12 +12,12 @@ def bcast_token( func, names=_info.pop('token')[5:-1].split(', ') ):
     return func( self, *args, **kwargs )
   return wrapped
 
-LOCAL  = typemap[ _info.pop('local')  ]
-GLOBAL = typemap[ _info.pop('global') ]
-HANDLE = typemap[ _info.pop('handle') ]
-SIZE   = typemap[ _info.pop('size')   ]
-SCALAR = typemap[ _info.pop('scalar') ]
-TOKEN  = numpy.character, MPI.CHAR
+LOCAL  = dtypes[ _info.pop('local')  ]
+GLOBAL = dtypes[ _info.pop('global') ]
+HANDLE = dtypes[ _info.pop('handle') ]
+SIZE   = dtypes[ _info.pop('size')   ]
+SCALAR = dtypes[ _info.pop('scalar') ]
+TOKEN  = dtypes[ 'char' ]
 
 assert not _info
 del _info

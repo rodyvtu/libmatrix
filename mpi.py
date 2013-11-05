@@ -2,6 +2,14 @@ import numpy
 from mpi4py import MPI
 
 
+dtypes = {
+  'int32'   : ( numpy.int32,     MPI.INT    ),
+  'int64'   : ( numpy.int64,     MPI.LONG   ),
+  'float64' : ( numpy.float64,   MPI.DOUBLE ),
+  'char'    : ( numpy.character, MPI.CHAR   ),
+}
+
+
 class InterComm( object ):
   'generic MPI communicator wrapper'
 
