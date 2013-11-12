@@ -3,6 +3,9 @@
 #include <Tpetra_Version.hpp>
 #include <Tpetra_CrsMatrix.hpp>
 
+#include <BelosTpetraAdapter.hpp>
+#include <BelosSolverFactory.hpp>
+
 #include <Teuchos_GlobalMPISession.hpp>
 #include <Teuchos_oblackholestream.hpp>
 #include <Teuchos_DefaultMpiComm.hpp>
@@ -28,8 +31,13 @@ const MPI::Datatype MPI_GLOBAL = MPI::LONG;
 typedef Kokkos::DefaultNode::DefaultNodeType node_t;
 typedef Tpetra::Map<local_t, global_t, node_t> map_t;
 typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
-typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t> matrix_t;
+typedef Tpetra::Operator<scalar_t, local_t, global_t, node_t> operator_t;
+typedef Tpetra::MultiVector<scalar_t, local_t, global_t, node_t> multivector_t;
+typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t, node_t> matrix_t;
 typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
+typedef Belos::SolverManager<scalar_t, multivector_t, operator_t> solvermanager_t;
+typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_t;
+typedef Teuchos::ParameterList params_t;
 
 const global_t indexBase = 0;
 
@@ -368,11 +376,55 @@ void matvec( MPI::Intercomm intercomm ) {
 }
 
 
+/* SOLVE: solve linear system
+   
+     -> broadcast 3 HANDLE (matrix,rhs,lhs)_handle
+*/
+void solve( MPI::Intercomm intercomm ) {
+
+  handle_t handles[3];
+  intercomm.Bcast( (void *)handles, 3, MPI_HANDLE, 0 );
+
+  Teuchos::RCP<matrix_t> matrix = Teuchos::rcp_dynamic_cast<matrix_t>( OBJECTS[handles[0]] );
+  Teuchos::RCP<vector_t> rhs = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[handles[1]] );
+  Teuchos::RCP<vector_t> lhs = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[handles[2]] );
+
+  Belos::SolverFactory<scalar_t, multivector_t, operator_t> factory;
+
+  Teuchos::RCP<params_t> solverParams = Teuchos::rcp( new params_t );
+  solverParams->set( "Num Blocks", 40 );
+  solverParams->set( "Maximum Iterations", 400 );
+  solverParams->set( "Convergence Tolerance", 1.0e-8 );
+
+  Teuchos::RCP<solvermanager_t> solver = factory.create( "GMRES", solverParams );
+  Teuchos::RCP<linearproblem_t> problem = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
+
+  //problem->setRightPrec (M);
+
+  // from the docs: Many of Belos' solvers require that this method has been
+  // called on the linear problem, before they can solve it.
+  problem->setProblem();
+
+  // Tell the solver what problem you want to solve.
+  solver->setProblem( problem );
+
+  // Attempt to solve the linear system.  result == Belos::Converged
+  // means that it was solved to the desired tolerance.  This call
+  // overwrites X with the computed approximate solution.
+  Belos::ReturnType result = solver->solve();
+
+  // Ask the solver how many iterations the last solve() took.
+  const int numIters = solver->getNumIters();
+
+  out(intercomm) << "solver finished in " << numIters << " iterations with result " << result << std::endl;
+}
+
+
 /* MPI SETUP CODE */
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec, vector_norm, vector_dot
+#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec, vector_norm, vector_dot, solve
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))

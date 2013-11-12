@@ -102,6 +102,11 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
+  vv = A.solve( w )
+
+  print 'solve result:', vv.toarray()
+  print 'difference:', v.toarray() - vv.toarray()
+
 
 try:
   test( nprocs=2, size=10 )

@@ -115,6 +115,10 @@ class LibMatrix( InterComm ):
     self.scatterv( cols, LOCAL )
     return self.gather_equal( HANDLE )
 
+  @bcast_token
+  def solve( self, matrix_handle, rhs_handle, lhs_handle ):
+    self.bcast( [ matrix_handle, rhs_handle, lhs_handle ], HANDLE )
+
   def __del__( self ):
     self.bcast( '\xff', TOKEN )
     InterComm.__del__( self )
@@ -178,9 +182,16 @@ class Matrix( object ):
     assert isinstance( vec, Vector )
     assert vec.mp == self.graph.domainmap
     assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.shape[0], self.graph.rangemap ) # TODO check which map to put
+    out = Vector( self.comm, self.shape[0], self.graph.rangemap )
     self.comm.matvec( self.handle, vec.handle, out.handle )
     return out
+
+  def solve( self, rhs ):
+    assert isinstance( rhs, Vector )
+    assert self.shape[0] == rhs.size
+    lhs = Vector( self.comm, self.shape[1], self.graph.domainmap )
+    self.comm.solve( self.handle, rhs.handle, lhs.handle )
+    return lhs
 
 
 class Graph( object ):

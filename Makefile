@@ -4,6 +4,8 @@ libmatrix.mpi: libmatrix.cpp
 	mpic++ $< -o $@ \
 	  -DDEBUG \
 	  -ltpetra \
+	  -lbelos \
+	  -lbelostpetra \
 	  -lteuchoscore \
 	  -lteuchoscomm \
 	  -lteuchosnumerics \
