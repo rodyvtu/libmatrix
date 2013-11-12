@@ -10,11 +10,16 @@ def test( nprocs, size ):
 
   dofs = numpy.arange( size )
   bounds = ( (size-1) * numpy.arange( nprocs+1, dtype=float ) / nprocs ).astype( int )
-  print bounds
 
-  print 'dof assignments:'
-  dofmap = map( range, bounds[:-1], bounds[1:]+1 )
-  for iproc, dofs in enumerate( dofmap ):
+  print 'row dof assignments:'
+  rowdofmap = map( numpy.arange, bounds[:-1], bounds[1:]+1 )
+  for iproc, dofs in enumerate( rowdofmap ):
+    print '  proc %d:' % iproc, dofs
+
+  bounds[-1] += 1
+  print '1-to-1 dof assignments:'
+  domaindofmap = map( range, bounds[:-1], bounds[1:] )
+  for iproc, dofs in enumerate( domaindofmap ):
     print '  proc %d:' % iproc, dofs
 
   block = numpy.array([[1,-1],[-1,1]])
@@ -22,37 +27,50 @@ def test( nprocs, size ):
   print block
 
   print 'sparsity:'
-  nzmap = [ [ dofs[max(0,idof-1):idof+2] for idof in range( len(dofs) ) ] for iproc, dofs in enumerate( dofmap ) ]
+  nzmap = [ [ dofs[max(0,idof-1):idof+2] - dofs[0] for idof in range( len(dofs) ) ] for iproc, dofs in enumerate( rowdofmap ) ]
   for iproc, nz in enumerate( nzmap ):
     print '  proc %d:' % iproc, nz
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
 
-  m = libmatrix.Map( comm, globs=dofmap )
-
-  v = libmatrix.Vector( comm, size, m )
-  for iproc, dofs in enumerate( dofmap ):
-    values = (numpy.array(dofs)+1)*10
-    values[0] /= 2
-    values[-1] /= 2
-    print 'adding', values, ' to ', dofs, ' on proc', iproc
-    v.add( rank=iproc, idx=dofs, data=values )
-
-  print 'resulting vector:', v.toarray()
+  rowmap = libmatrix.Map( comm, globs=rowdofmap )
+  domainmap = libmatrix.Map( comm, globs=domaindofmap )
 
   v_npy = numpy.arange(1,size+1) * 10
   v_npy[0] /= 2
-  v_npy[1] /= 2
+  v_npy[-1] /= 2
 
-  print 'reference vector:', v.toarray()
+  v = libmatrix.Vector( comm, size, domainmap )
 
-  graph = libmatrix.Graph( comm, m, rows=nzmap )
+  for iproc, dofs in enumerate( domaindofmap ):
+    values = v_npy[dofs]
+    print 'adding', values, ' to ', dofs, ' on proc', iproc
+    v.add( rank=iproc, idx=dofs, data=values )
+
+# for iproc, dofs in enumerate( rowdofmap ):
+#   values = (numpy.array(dofs)+1)*10
+#   values[0] /= 2
+#   values[-1] /= 2
+#   print 'adding', values, ' to ', dofs, ' on proc', iproc
+#   v.add( rank=iproc, idx=dofs, data=values )
+
+  print 'resulting vector:', v.toarray()
+  print 'reference vector:', v_npy
+
+  norm = v.norm()
+
+  print 'resulting norm:', norm
+  print 'reference norm:', numpy.linalg.norm( v_npy )
+
+  graph = libmatrix.Graph( comm, rowmap, rowmap, domainmap, domainmap, rows=nzmap )
 
   A = libmatrix.Matrix( comm, (size,size), graph )
-  for iproc, dofs in enumerate( dofmap ):
+  for iproc, dofs in enumerate( rowdofmap ):
     for idx in zip( dofs[:-1], dofs[1:] ):
       print 'adding block to ', idx, ' on proc', iproc
       A.add( rank=iproc, rowidx=idx, colidx=idx, data=block )
+
+  #A.add( rank=0, rowidx=[0,size-1], colidx=[0,size-1], data=block )
 
   A.complete()
 
@@ -60,13 +78,29 @@ def test( nprocs, size ):
   A_npy[0,0] = A_npy[-1,-1] = 1
 
   print 'libmatrix norm:', A.norm()
-  print 'reference norm:', numpy.sqrt( ( A_npy**2 ).sum() )
 
   print 'multiplying matrix and vector'
   w = A.matvec( v )
 
   print 'libmatrix result:', w.toarray()
   print 'reference result:', numpy.dot( A_npy, v_npy )
+
+  vectors = []
+  numbers = []
+  for iproc, dofs in enumerate(domaindofmap):
+    for idof in dofs:
+      ei = libmatrix.Vector( comm, size, domainmap )
+      ei.add( rank=iproc, idx=[idof], data=[1] )
+      print 'unit vector iproc=%d idof=%d:' % (iproc,idof), ei.toarray()
+      vectors.append( A.matvec( ei ).toarray() )
+      numbers.append( v.dot( ei ) )
+
+  B = numpy.array( vectors )
+  print B
+  print 'reconstructed norm:', numpy.sqrt( ( B**2 ).sum() )
+  print 'reference norm:', numpy.sqrt( ( A_npy**2 ).sum() )
+
+  print 'reconstructed vector:', numpy.array( numbers )
 
 
 try:

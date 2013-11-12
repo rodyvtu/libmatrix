@@ -65,6 +65,17 @@ class LibMatrix( InterComm ):
     return array
 
   @bcast_token
+  def vector_norm( self, handle ):
+    self.bcast( handle, HANDLE )
+    return self.gather_equal( SCALAR )
+
+  @bcast_token
+  def vector_dot( self, handle1, handle2 ):
+    self.bcast( handle1, HANDLE )
+    self.bcast( handle2, HANDLE )
+    return self.gather_equal( SCALAR )
+
+  @bcast_token
   def new_matrix( self, graph_handle ):
     self.bcast( graph_handle, HANDLE )
     return self.gather_equal( HANDLE )
@@ -96,12 +107,12 @@ class LibMatrix( InterComm ):
     self.bcast( [ matrix_handle, vec_handle, out_handle ], HANDLE )
 
   @bcast_token
-  def new_graph( self, map_handle, rows ):
-    self.bcast( map_handle, HANDLE )
-    numcols = [ map( len, row ) for row in rows ]
-    self.scatterv( numcols, SIZE )
+  def new_graph( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
+    self.bcast( [ rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], HANDLE )
+    offsets = [ numpy.cumsum( [0] + map( len, row ) ) for row in rows ]
+    self.scatterv( offsets, SIZE )
     cols = [ numpy.concatenate( row ) for row in rows ]
-    self.scatterv( cols, GLOBAL )
+    self.scatterv( cols, LOCAL )
     return self.gather_equal( HANDLE )
 
   def __del__( self ):
@@ -136,6 +147,14 @@ class Vector( object ):
   def toarray( self ):
     return self.comm.get_vector( self.handle, self.size, self.mp.globs )
 
+  def norm( self ):
+    return self.comm.vector_norm( self.handle )
+
+  def dot( self, other ):
+    assert isinstance( other, Vector )
+    assert self.size == other.size
+    return self.comm.vector_dot( self.handle, other.handle )
+
 
 class Matrix( object ):
 
@@ -157,17 +176,24 @@ class Matrix( object ):
 
   def matvec( self, vec ):
     assert isinstance( vec, Vector )
+    assert vec.mp == self.graph.domainmap
     assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.shape[0], self.graph.mp )
+    out = Vector( self.comm, self.shape[0], self.graph.rangemap ) # TODO check which map to put
     self.comm.matvec( self.handle, vec.handle, out.handle )
     return out
 
 
 class Graph( object ):
 
-  def __init__( self, comm, mp, rows ):
+  def __init__( self, comm, rowmap, columnmap, domainmap, rangemap, rows ):
     self.comm = comm
-    assert isinstance( mp, Map )
-    self.mp = mp
-    self.handle = comm.new_graph( mp.handle, rows )
+    assert isinstance( rowmap, Map )
+    assert isinstance( columnmap, Map )
+    assert isinstance( domainmap, Map )
+    assert isinstance( rangemap, Map )
+    self.rowmap = rowmap
+    self.columnmap = columnmap
+    self.domainmap = domainmap
+    self.rangemap = rangemap
+    self.handle = comm.new_graph( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows )
 

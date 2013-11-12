@@ -175,45 +175,75 @@ void get_vector( MPI::Intercomm intercomm ) {
 }
 
 
+/* VECTOR_DOT: compute frobenius norm
+   
+     -> broadcast 1 HANDLE vector1_handle
+     -> broadcast 1 HANDLE vector2_handle
+    <-  gather 1 SCALAR norm
+*/
+void vector_dot( MPI::Intercomm intercomm ) {
+
+  handle_t ivec;
+  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<vector_t> vector1 = VECTORS[ivec];
+  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<vector_t> vector2 = VECTORS[ivec];
+
+  scalar_t dot = vector1->dot( *vector2 );
+
+  intercomm.Gather( (void *)(&dot), 1, MPI_SCALAR, NULL, 1, MPI_SCALAR, 0 );
+}
+
+
+/* VECTOR_NORM: compute frobenius norm
+   
+     -> broadcast 1 HANDLE vector_handle
+    <-  gather 1 SCALAR norm
+*/
+void vector_norm( MPI::Intercomm intercomm ) {
+
+  handle_t ivec;
+  intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
+  Teuchos::RCP<vector_t> vector = VECTORS[ivec];
+
+  scalar_t norm = vector->norm2();
+
+  intercomm.Gather( (void *)(&norm), 1, MPI_SCALAR, NULL, 1, MPI_SCALAR, 0 );
+}
+
+
 /* NEW_GRAPH: create new graph
    
-     -> broadcast 1 HANDLE map_handle
-     -> scatterv 1 SIZE ncolumns_per_row
-     -> scatterv ncolumns_per_row GLOBAL columns (concatenated)
+     -> broadcast 4 HANDLE (rowmap,colmap,dommap,rngmap)_handle
+     -> scatterv nrows+1 SIZE offsets
+     -> scatterv offsets[-1] LOCAL columns (concatenated)
     <-  gather 1 HANDLE graph_handle
 */
 void new_graph( MPI::Intercomm intercomm ) {
 
   handle_t igraph = GRAPHS.size();
 
-  handle_t imap;
-  intercomm.Bcast( (void *)(&imap), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<const map_t> map = MAPS[imap];
+  handle_t imap[4];
+  intercomm.Bcast( (void *)imap, 4, MPI_HANDLE, 0 );
 
-  size_t nrows = map->getNodeNumElements();
-  out(intercomm) << "creating graph #" << igraph << " from map #" << imap << " with " << nrows << " rows" << std::endl;
+  Teuchos::RCP<const map_t> rowmap = MAPS[imap[0]];
+  Teuchos::RCP<const map_t> colmap = MAPS[imap[1]];
+  Teuchos::RCP<const map_t> dommap = MAPS[imap[2]];
+  Teuchos::RCP<const map_t> rngmap = MAPS[imap[3]];
 
-  Teuchos::ArrayRCP<const size_t> numcols( nrows );
-  const size_t *numcols_ptr = numcols.getRawPtr();
+  size_t nrows = rowmap->getNodeNumElements();
 
-  intercomm.Scatterv( NULL, NULL, NULL, MPI_SIZE, (void *)numcols_ptr, nrows, MPI_SIZE, 0 );
+  out(intercomm) << "creating graph #" << igraph << " from rowmap #" << imap[0] << ", colmap #" << imap[1] << ", dommap #" << imap[2] << ", rngmap #" << imap[3] << " with " << nrows << " rows" << std::endl;
 
-  int nitems = 0;
-  for ( int irow = 0; irow < nrows; irow++ ) {
-    nitems += numcols_ptr[ irow ]; // TODO check if ArrayRCP supports summation
-  }
+  Teuchos::ArrayRCP<size_t> offsets( nrows+1 );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI_SIZE, (void *)offsets.getRawPtr(), nrows+1, MPI_SIZE, 0 );
 
-  Teuchos::ArrayRCP<global_t> items( nitems );
-  intercomm.Scatterv( NULL, NULL, NULL, MPI_GLOBAL, (void *)items.getRawPtr(), nitems, MPI_GLOBAL, 0 );
+  int nindices = offsets[nrows];
+  Teuchos::ArrayRCP<local_t> indices( nindices );
+  intercomm.Scatterv( NULL, NULL, NULL, MPI_LOCAL, (void *)indices.getRawPtr(), nindices, MPI_LOCAL, 0 );
 
-  Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( map, numcols ) );
-  size_t offset = 0;
-  for ( int irow = 0; irow < nrows; irow++ ) {
-    size_t size = numcols_ptr[ irow ];
-    graph->insertGlobalIndices( irow, items.view(offset,size) );
-    offset += size;
-  }
-  graph->fillComplete();
+  Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( rowmap, colmap, offsets, indices ) );
+  graph->fillComplete( dommap, rngmap );
 
   GRAPHS.push_back( graph );
 
@@ -300,7 +330,7 @@ void fill_complete( MPI::Intercomm intercomm ) {
 
   out(intercomm) << "completing matrix #" << imat << std::endl;
 
-  matrix->fillComplete();
+  matrix->fillComplete( matrix->getDomainMap(), matrix->getRangeMap() );
 }
 
 
@@ -342,7 +372,7 @@ void matvec( MPI::Intercomm intercomm ) {
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec
+#define TOKENS new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec, vector_norm, vector_dot
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
