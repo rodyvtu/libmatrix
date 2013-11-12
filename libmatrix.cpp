@@ -33,10 +33,7 @@ typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
 
 const global_t indexBase = 0;
 
-Teuchos::Array<Teuchos::RCP<vector_t> > VECTORS;
-Teuchos::Array<Teuchos::RCP<matrix_t> > MATRICES;
-Teuchos::Array<Teuchos::RCP<const map_t> > MAPS;
-Teuchos::Array<Teuchos::RCP<const graph_t> > GRAPHS;
+Teuchos::Array<Teuchos::RCP<Teuchos::Describable> > OBJECTS;
 
 
 /* MISC HELPER FUNCTIONS */
@@ -76,7 +73,7 @@ inline std::ostream& out( MPI::Intercomm intercomm ) {
 */
 void new_map( MPI::Intercomm intercomm ) {
 
-  handle_t imap = MAPS.size();
+  handle_t imap = OBJECTS.size();
 
   size_t size, ndofs;
   intercomm.Bcast( (void *)(&size), 1, MPI_SIZE, 0 );
@@ -90,7 +87,7 @@ void new_map( MPI::Intercomm intercomm ) {
   Teuchos::RCP<node_t> node = Kokkos::DefaultNode::getDefaultNode ();
   Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
 
-  MAPS.push_back( Teuchos::rcp( new map_t( size, elementList, indexBase, comm, node ) ) );
+  OBJECTS.push_back( Teuchos::rcp( new map_t( size, elementList, indexBase, comm, node ) ) );
 
   intercomm.Gather( (void *)(&imap), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
@@ -103,15 +100,15 @@ void new_map( MPI::Intercomm intercomm ) {
 */
 void new_vector( MPI::Intercomm intercomm ) {
 
-  handle_t ivec = VECTORS.size();
+  handle_t ivec = OBJECTS.size();
 
   handle_t imap;
   intercomm.Bcast( (void *)(&imap), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<const map_t> map = MAPS[imap];
+  Teuchos::RCP<const map_t> map = Teuchos::rcp_dynamic_cast<const map_t>( OBJECTS[imap], true );
 
   out(intercomm) << "creating vector #" << ivec << " from map #" << imap << std::endl;
 
-  VECTORS.push_back( Teuchos::rcp( new vector_t( map ) ) );
+  OBJECTS.push_back( Teuchos::rcp( new vector_t( map ) ) );
 
   intercomm.Gather( (void *)(&ivec), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
@@ -150,7 +147,7 @@ void add_evec( MPI::Intercomm intercomm ) {
   intercomm.Recv( (void *)idx.getRawPtr(), nitems, MPI_GLOBAL, 0, 0 );
   intercomm.Recv( (void *)data.getRawPtr(), nitems, MPI_SCALAR, 0, 0 );
 
-  Teuchos::RCP<vector_t> vec = VECTORS[ivec];
+  Teuchos::RCP<vector_t> vec = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[ivec], true );
 
   for ( int i = 0; i < nitems; i++ ) {
     out(intercomm) << idx[i] << " : " << data[i] << std::endl;
@@ -169,7 +166,10 @@ void get_vector( MPI::Intercomm intercomm ) {
 
   handle_t ivec;
   intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
-  Teuchos::ArrayRCP<const scalar_t> data = VECTORS[ivec]->getData();
+
+  Teuchos::RCP<vector_t> vec = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[ivec], true );
+
+  Teuchos::ArrayRCP<const scalar_t> data = vec->getData();
 
   intercomm.Gatherv( (void *)(data.get()), data.size(), MPI_SCALAR, NULL, NULL, NULL, MPI_SCALAR, 0 );
 }
@@ -185,9 +185,9 @@ void vector_dot( MPI::Intercomm intercomm ) {
 
   handle_t ivec;
   intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<vector_t> vector1 = VECTORS[ivec];
+  Teuchos::RCP<vector_t> vector1 = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[ivec], true );
   intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<vector_t> vector2 = VECTORS[ivec];
+  Teuchos::RCP<vector_t> vector2 = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[ivec], true );
 
   scalar_t dot = vector1->dot( *vector2 );
 
@@ -204,7 +204,7 @@ void vector_norm( MPI::Intercomm intercomm ) {
 
   handle_t ivec;
   intercomm.Bcast( (void *)(&ivec), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<vector_t> vector = VECTORS[ivec];
+  Teuchos::RCP<vector_t> vector = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[ivec], true );
 
   scalar_t norm = vector->norm2();
 
@@ -221,15 +221,15 @@ void vector_norm( MPI::Intercomm intercomm ) {
 */
 void new_graph( MPI::Intercomm intercomm ) {
 
-  handle_t igraph = GRAPHS.size();
+  handle_t igraph = OBJECTS.size();
 
   handle_t imap[4];
   intercomm.Bcast( (void *)imap, 4, MPI_HANDLE, 0 );
 
-  Teuchos::RCP<const map_t> rowmap = MAPS[imap[0]];
-  Teuchos::RCP<const map_t> colmap = MAPS[imap[1]];
-  Teuchos::RCP<const map_t> dommap = MAPS[imap[2]];
-  Teuchos::RCP<const map_t> rngmap = MAPS[imap[3]];
+  Teuchos::RCP<const map_t> rowmap = Teuchos::rcp_dynamic_cast<const map_t>( OBJECTS[imap[0]], true );
+  Teuchos::RCP<const map_t> colmap = Teuchos::rcp_dynamic_cast<const map_t>( OBJECTS[imap[1]], true );
+  Teuchos::RCP<const map_t> dommap = Teuchos::rcp_dynamic_cast<const map_t>( OBJECTS[imap[2]], true );
+  Teuchos::RCP<const map_t> rngmap = Teuchos::rcp_dynamic_cast<const map_t>( OBJECTS[imap[3]], true );
 
   size_t nrows = rowmap->getNodeNumElements();
 
@@ -245,7 +245,7 @@ void new_graph( MPI::Intercomm intercomm ) {
   Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( rowmap, colmap, offsets, indices ) );
   graph->fillComplete( dommap, rngmap );
 
-  GRAPHS.push_back( graph );
+  OBJECTS.push_back( graph );
 
   intercomm.Gather( (void *)(&igraph), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
@@ -258,15 +258,15 @@ void new_graph( MPI::Intercomm intercomm ) {
 */
 void new_matrix( MPI::Intercomm intercomm ) {
 
-  handle_t imat = MATRICES.size();
+  handle_t imat = OBJECTS.size();
 
   handle_t igraph;
   intercomm.Bcast( (void *)(&igraph), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<const graph_t> graph = GRAPHS[igraph];
+  Teuchos::RCP<const graph_t> graph = Teuchos::rcp_dynamic_cast<const graph_t>( OBJECTS[igraph], true );
 
   out(intercomm) << "creating matrix #" << imat << " from graph #" << igraph << std::endl;
 
-  MATRICES.push_back( Teuchos::rcp( new matrix_t( graph ) ) );
+  OBJECTS.push_back( Teuchos::rcp( new matrix_t( graph ) ) );
 
   intercomm.Gather( (void *)(&imat), 1, MPI_HANDLE, NULL, 1, MPI_HANDLE, 0 );
 }
@@ -308,7 +308,7 @@ void add_emat( MPI::Intercomm intercomm ) {
   intercomm.Recv( (void *)colidx.getRawPtr(), nitems[1], MPI_GLOBAL, 0, 0 );
   intercomm.Recv( (void *)data.getRawPtr(), nitems[0]*nitems[1], MPI_SCALAR, 0, 0 );
 
-  Teuchos::RCP<matrix_t> mat = MATRICES[imat];
+  Teuchos::RCP<matrix_t> mat = Teuchos::rcp_dynamic_cast<matrix_t>( OBJECTS[imat], true );
 
   const Teuchos::ArrayView<const global_t> colidx_view = colidx.view( 0, nitems[1] );
   for ( int i = 0; i < nitems[0]; i++ ) {
@@ -326,7 +326,7 @@ void fill_complete( MPI::Intercomm intercomm ) {
 
   handle_t imat;
   intercomm.Bcast( (void *)(&imat), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<matrix_t> matrix = MATRICES[imat];
+  Teuchos::RCP<matrix_t> matrix = Teuchos::rcp_dynamic_cast<matrix_t>( OBJECTS[imat], true );
 
   out(intercomm) << "completing matrix #" << imat << std::endl;
 
@@ -343,7 +343,7 @@ void matrix_norm( MPI::Intercomm intercomm ) {
 
   handle_t imat;
   intercomm.Bcast( (void *)(&imat), 1, MPI_HANDLE, 0 );
-  Teuchos::RCP<matrix_t> matrix = MATRICES[imat];
+  Teuchos::RCP<matrix_t> matrix = Teuchos::rcp_dynamic_cast<matrix_t>( OBJECTS[imat], true );
 
   scalar_t norm = matrix->getFrobeniusNorm();
 
@@ -360,9 +360,9 @@ void matvec( MPI::Intercomm intercomm ) {
   handle_t handles[3];
   intercomm.Bcast( (void *)handles, 3, MPI_HANDLE, 0 );
 
-  Teuchos::RCP<matrix_t> matrix = MATRICES[handles[0]];
-  Teuchos::RCP<vector_t> vector = VECTORS[handles[1]];
-  Teuchos::RCP<vector_t> out = VECTORS[handles[2]];
+  Teuchos::RCP<matrix_t> matrix = Teuchos::rcp_dynamic_cast<matrix_t>( OBJECTS[handles[0]], true );
+  Teuchos::RCP<vector_t> vector = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[handles[1]], true );
+  Teuchos::RCP<vector_t> out = Teuchos::rcp_dynamic_cast<vector_t>( OBJECTS[handles[2]], true );
 
   matrix->apply( *vector, *out );
 }
