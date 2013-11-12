@@ -24,7 +24,7 @@ typedef long global_t;
 // matching mpi types
 const MPI::Datatype MPI_SCALAR = MPI::DOUBLE;
 const MPI::Datatype MPI_HANDLE = MPI::INT;
-const MPI::Datatype MPI_SIZE = MPI::INT;
+const MPI::Datatype MPI_SIZE = sizeof(size_t) == 4 ? MPI::INT : sizeof(size_t) == 5 ? MPI::LONG : 0;
 const MPI::Datatype MPI_LOCAL = MPI::INT;
 const MPI::Datatype MPI_GLOBAL = MPI::LONG;
 
