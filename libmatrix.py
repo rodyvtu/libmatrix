@@ -49,7 +49,7 @@ class LibMatrix( InterComm ):
     self.bcast( handle, HANDLE )
 
   @bcast_token
-  def new_map( self, globs ):
+  def map_new( self, globs ):
     map_handle = self.claim_handle()
     lengths = map( len, globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
@@ -60,13 +60,13 @@ class LibMatrix( InterComm ):
     return map_handle
 
   @bcast_token
-  def new_vector( self, map_handle ):
+  def vector_new( self, map_handle ):
     vec_handle = self.claim_handle()
     self.bcast( [ vec_handle, map_handle ], HANDLE )
     return vec_handle
 
   @bcast_token
-  def add_evec( self, handle, rank, idx, data ):
+  def vector_add_block( self, handle, rank, idx, data ):
     n = len(idx)
     assert len(data) == n
     self.bcast( rank, SIZE )
@@ -76,7 +76,7 @@ class LibMatrix( InterComm ):
     self.send( rank, data, SCALAR )
 
   @bcast_token
-  def get_vector( self, vec_handle, size, globs ):
+  def vector_getdata( self, vec_handle, size, globs ):
     self.bcast( vec_handle, HANDLE )
     array = numpy.zeros( size ) # TODO fix length
     lengths = map( len, globs )
@@ -96,13 +96,13 @@ class LibMatrix( InterComm ):
     return self.gather_equal( SCALAR )
 
   @bcast_token
-  def new_matrix( self, graph_handle ):
+  def matrix_new( self, graph_handle ):
     matrix_handle = self.claim_handle()
     self.bcast( [ matrix_handle, graph_handle ], HANDLE )
     return matrix_handle
 
   @bcast_token
-  def add_emat( self, handle, rank, rowidx, colidx, data ):
+  def matrix_add_block( self, handle, rank, rowidx, colidx, data ):
     data = numpy.asarray(data)
     shape = len(rowidx), len(colidx)
     assert data.shape == shape
@@ -115,7 +115,7 @@ class LibMatrix( InterComm ):
     self.send( rank, data.ravel(), SCALAR )
 
   @bcast_token
-  def fill_complete( self, handle ):
+  def matrix_fillcomplete( self, handle ):
     self.bcast( handle, HANDLE )
 
   @bcast_token
@@ -124,11 +124,11 @@ class LibMatrix( InterComm ):
     return self.gather_equal( SCALAR )
 
   @bcast_token
-  def matvec( self, matrix_handle, vec_handle, out_handle ):
+  def matrix_apply( self, matrix_handle, vec_handle, out_handle ):
     self.bcast( [ matrix_handle, vec_handle, out_handle ], HANDLE )
 
   @bcast_token
-  def new_graph( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
+  def graph_new( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
     graph_handle = self.claim_handle()
     self.bcast( [ graph_handle, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], HANDLE )
     offsets = [ numpy.cumsum( [0] + map( len, row ) ) for row in rows ]
@@ -138,7 +138,7 @@ class LibMatrix( InterComm ):
     return graph_handle
 
   @bcast_token
-  def solve( self, matrix_handle, rhs_handle, lhs_handle ):
+  def matrix_solve( self, matrix_handle, rhs_handle, lhs_handle ):
     self.bcast( [ matrix_handle, rhs_handle, lhs_handle ], HANDLE )
 
   def __del__( self ):
@@ -155,7 +155,7 @@ class Map( object ):
     self.comm = comm
     assert len(globs) == comm.size
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
-    self.handle = comm.new_map( globs )
+    self.handle = comm.map_new( globs )
 
   def __del__( self ):
     self.comm.release( self.handle )
@@ -168,13 +168,13 @@ class Vector( object ):
     self.size = size
     assert isinstance( mp, Map )
     self.mp = mp
-    self.handle = comm.new_vector( mp.handle )
+    self.handle = comm.vector_new( mp.handle )
 
   def add( self, rank, idx, data ):
-    self.comm.add_evec( self.handle, rank, idx, data )
+    self.comm.vector_add_block( self.handle, rank, idx, data )
 
   def toarray( self ):
-    return self.comm.get_vector( self.handle, self.size, self.mp.globs )
+    return self.comm.vector_getdata( self.handle, self.size, self.mp.globs )
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
@@ -195,13 +195,13 @@ class Matrix( object ):
     self.shape = shape
     assert isinstance( graph, Graph )
     self.graph = graph
-    self.handle = comm.new_matrix( graph.handle )
+    self.handle = comm.matrix_new( graph.handle )
 
   def add( self, rank, rowidx, colidx, data ):
-    self.comm.add_emat( self.handle, rank, rowidx, colidx, data )
+    self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
 
   def complete( self ):
-    self.comm.fill_complete( self.handle )
+    self.comm.matrix_fillcomplete( self.handle )
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
@@ -211,14 +211,14 @@ class Matrix( object ):
     assert vec.mp == self.graph.domainmap
     assert self.shape[1] == vec.size
     out = Vector( self.comm, self.shape[0], self.graph.rangemap )
-    self.comm.matvec( self.handle, vec.handle, out.handle )
+    self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
   def solve( self, rhs ):
     assert isinstance( rhs, Vector )
     assert self.shape[0] == rhs.size
     lhs = Vector( self.comm, self.shape[1], self.graph.domainmap )
-    self.comm.solve( self.handle, rhs.handle, lhs.handle )
+    self.comm.matrix_solve( self.handle, rhs.handle, lhs.handle )
     return lhs
 
   def __del__( self ):
@@ -237,7 +237,7 @@ class Graph( object ):
     self.columnmap = columnmap
     self.domainmap = domainmap
     self.rangemap = rangemap
-    self.handle = comm.new_graph( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows )
+    self.handle = comm.graph_new( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows )
 
   def __del__( self ):
     self.comm.release( self.handle )

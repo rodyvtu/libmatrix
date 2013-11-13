@@ -114,14 +114,14 @@ void release( MPI::Intercomm intercomm ) {
 }
 
 
-/* NEW_MAP: create new map
+/* MAP_NEW: create new map
    
      -> broadcast HANDLE handle.map
      -> broadcast SIZE map_size
      -> scatter SIZE number_of_items[map_size]
      -> scatterv GLOBAL items[number_of_items]
 */
-void new_map( MPI::Intercomm intercomm ) {
+void map_new( MPI::Intercomm intercomm ) {
 
   struct { handle_t map; } handle;
   intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
@@ -143,11 +143,11 @@ void new_map( MPI::Intercomm intercomm ) {
 }
 
 
-/* NEW_VECTOR: create new vector
+/* VECTOR_NEW: create new vector
    
      -> broadcast HANDLE handle.{vector,map}
 */
-void new_vector( MPI::Intercomm intercomm ) {
+void vector_new( MPI::Intercomm intercomm ) {
 
   struct { handle_t vector, map; } handle;
   intercomm.Bcast( (void *)(&handle), 2, MPI_HANDLE, 0 );
@@ -162,7 +162,7 @@ void new_vector( MPI::Intercomm intercomm ) {
 }
 
 
-/* ADD_EVEC: add items to vector
+/* VECTOR_ADD_BLOCK: add items to vector
    
      -> broadcast SIZE rank
    if rank == myrank
@@ -172,7 +172,7 @@ void new_vector( MPI::Intercomm intercomm ) {
      -> recv SCALAR values[number_of_items]
    endif
 */
-void add_evec( MPI::Intercomm intercomm ) {
+void vector_add_block( MPI::Intercomm intercomm ) {
 
   size_t rank;
   intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
@@ -205,12 +205,12 @@ void add_evec( MPI::Intercomm intercomm ) {
 }
 
 
-/* GET_VECTOR: collect vector over the intercom
+/* VECTOR_GETDATA: collect vector over the intercom
   
      -> broadcast HANDLE handle.vector
     <-  gatherv SCALAR values[vector.size]
 */
-void get_vector( MPI::Intercomm intercomm ) {
+void vector_getdata( MPI::Intercomm intercomm ) {
 
   struct { handle_t vector; } handle;
   intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
@@ -258,13 +258,13 @@ void vector_norm( MPI::Intercomm intercomm ) {
 }
 
 
-/* NEW_GRAPH: create new graph
+/* GRAPH_NEW: create new graph
    
      -> broadcast HANDLE handle.{graph,rowmap,colmap,domainmap,rangemap}
      -> scatterv SIZE offsets[nrows+1]
      -> scatterv LOCAL columns[offsets[-1]]
 */
-void new_graph( MPI::Intercomm intercomm ) {
+void graph_new( MPI::Intercomm intercomm ) {
 
   struct { handle_t graph, rowmap, colmap, domainmap, rangemap; } handle;
   intercomm.Bcast( (void *)(&handle), 5, MPI_HANDLE, 0 );
@@ -292,11 +292,11 @@ void new_graph( MPI::Intercomm intercomm ) {
 }
 
 
-/* NEW_MATRIX: create new matrix
+/* MATRIX_NEW: create new matrix
    
      -> broadcast HANDLE handle.{matrix,graph}
 */
-void new_matrix( MPI::Intercomm intercomm ) {
+void matrix_new( MPI::Intercomm intercomm ) {
 
   struct { handle_t matrix, graph; } handle;
   intercomm.Bcast( (void *)(&handle), 2, MPI_HANDLE, 0 );
@@ -311,7 +311,7 @@ void new_matrix( MPI::Intercomm intercomm ) {
 }
 
 
-/* ADD_EMAT: add items to matrix
+/* MATRIX_ADD_BLOCK: add items to matrix
    
      -> broadcast SIZE rank
    if rank == myrank
@@ -322,7 +322,7 @@ void new_matrix( MPI::Intercomm intercomm ) {
      -> recv SCALAR values[number_of_(rows*cols)]
    endif
 */
-void add_emat( MPI::Intercomm intercomm ) {
+void matrix_add_block( MPI::Intercomm intercomm ) {
 
   size_t rank;
   intercomm.Bcast( (void *)(&rank), 1, MPI_SIZE, 0 );
@@ -357,11 +357,11 @@ void add_emat( MPI::Intercomm intercomm ) {
 }
 
 
-/* FILL_COMPLETE: set matrix to fill-complete
+/* MATRIX_FILLCOMPLETE: set matrix to fill-complete
    
      -> broadcast HANDLE handle.matrix
 */
-void fill_complete( MPI::Intercomm intercomm ) {
+void matrix_fillcomplete( MPI::Intercomm intercomm ) {
 
   struct { handle_t matrix; } handle;
   intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
@@ -390,11 +390,11 @@ void matrix_norm( MPI::Intercomm intercomm ) {
 }
 
 
-/* MATVEC: matrix vector multiplication
+/* MATRIX_APPLY: matrix vector multiplication
    
      -> broadcast HANDLE handle.{matrix,out,vector}
 */
-void matvec( MPI::Intercomm intercomm ) {
+void matrix_apply( MPI::Intercomm intercomm ) {
 
   struct { handle_t matrix, rhs, lhs; } handle;
   intercomm.Bcast( (void *)(&handle), 3, MPI_HANDLE, 0 );
@@ -407,11 +407,11 @@ void matvec( MPI::Intercomm intercomm ) {
 }
 
 
-/* SOLVE: solve linear system
+/* MATRIX_SOLVE: solve linear system
    
      -> broadcast HANDLE handle.{matrix,rhs,lhs}
 */
-void solve( MPI::Intercomm intercomm ) {
+void matrix_solve( MPI::Intercomm intercomm ) {
 
   struct { handle_t matrix, rhs, lhs; } handle;
   intercomm.Bcast( (void *)(&handle), 3, MPI_HANDLE, 0 );
@@ -455,7 +455,9 @@ void solve( MPI::Intercomm intercomm ) {
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS release, new_vector, add_evec, get_vector, new_map, new_graph, new_matrix, add_emat, fill_complete, matrix_norm, matvec, vector_norm, vector_dot, solve
+#define TOKENS release, map_new, graph_new, \
+  vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
+  matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
