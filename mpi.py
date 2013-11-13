@@ -46,7 +46,7 @@ class InterComm( object ):
     self.__comm.Scatterv( [ concatarray, lengths, offsets, mpitype ], None, root=MPI.ROOT )
   
   def gatherv( self, lengths, (npytype,mpitype) ):
-    array = numpy.empty( 20, dtype=npytype )
+    array = numpy.empty( sum(lengths), dtype=npytype )
     offsets = numpy.concatenate( [ [0], numpy.cumsum( lengths[:-1] ) ] ) # first offset = 0
     self.__comm.Gatherv( None, [ array, lengths, offsets, mpitype ], root=MPI.ROOT )
     return [ array[i:i+n] for i, n in zip( offsets, lengths ) ]
