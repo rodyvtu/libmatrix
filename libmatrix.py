@@ -29,20 +29,41 @@ class LibMatrix( InterComm ):
   def __init__( self, nprocs ):
     InterComm.__init__( self, 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
     assert self.size == nprocs
+    self.nhandles = 0
+    self.released = []
+
+  def claim_handle( self ):
+    if self.released:
+      handle = self.released.pop()
+    else:
+      handle = self.nhandles
+      self.nhandles += 1
+    return handle
+
+  def release_handle( self, handle ):
+    assert handle < self.nhandles and handle not in self.released
+    self.released.append( handle )
+
+  @bcast_token
+  def release( self, handle ):
+    self.bcast( handle, HANDLE )
 
   @bcast_token
   def new_map( self, globs ):
+    map_handle = self.claim_handle()
     lengths = map( len, globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
+    self.bcast( map_handle, HANDLE )
     self.bcast( size, SIZE )
     self.scatter( lengths, SIZE )
     self.scatterv( globs, GLOBAL )
-    return self.gather_equal( HANDLE )
+    return map_handle
 
   @bcast_token
   def new_vector( self, map_handle ):
-    self.bcast( map_handle, HANDLE )
-    return self.gather_equal( HANDLE )
+    vec_handle = self.claim_handle()
+    self.bcast( [ vec_handle, map_handle ], HANDLE )
+    return vec_handle
 
   @bcast_token
   def add_evec( self, handle, rank, idx, data ):
@@ -71,14 +92,14 @@ class LibMatrix( InterComm ):
 
   @bcast_token
   def vector_dot( self, handle1, handle2 ):
-    self.bcast( handle1, HANDLE )
-    self.bcast( handle2, HANDLE )
+    self.bcast( [ handle1, handle2 ], HANDLE )
     return self.gather_equal( SCALAR )
 
   @bcast_token
   def new_matrix( self, graph_handle ):
-    self.bcast( graph_handle, HANDLE )
-    return self.gather_equal( HANDLE )
+    matrix_handle = self.claim_handle()
+    self.bcast( [ matrix_handle, graph_handle ], HANDLE )
+    return matrix_handle
 
   @bcast_token
   def add_emat( self, handle, rank, rowidx, colidx, data ):
@@ -108,12 +129,13 @@ class LibMatrix( InterComm ):
 
   @bcast_token
   def new_graph( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
-    self.bcast( [ rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], HANDLE )
+    graph_handle = self.claim_handle()
+    self.bcast( [ graph_handle, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], HANDLE )
     offsets = [ numpy.cumsum( [0] + map( len, row ) ) for row in rows ]
     self.scatterv( offsets, SIZE )
     cols = [ numpy.concatenate( row ) for row in rows ]
     self.scatterv( cols, LOCAL )
-    return self.gather_equal( HANDLE )
+    return graph_handle
 
   @bcast_token
   def solve( self, matrix_handle, rhs_handle, lhs_handle ):
@@ -134,6 +156,9 @@ class Map( object ):
     assert len(globs) == comm.size
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
     self.handle = comm.new_map( globs )
+
+  def __del__( self ):
+    self.comm.release( self.handle )
 
 
 class Vector( object ):
@@ -158,6 +183,9 @@ class Vector( object ):
     assert isinstance( other, Vector )
     assert self.size == other.size
     return self.comm.vector_dot( self.handle, other.handle )
+
+  def __del__( self ):
+    self.comm.release( self.handle )
 
 
 class Matrix( object ):
@@ -193,6 +221,9 @@ class Matrix( object ):
     self.comm.solve( self.handle, rhs.handle, lhs.handle )
     return lhs
 
+  def __del__( self ):
+    self.comm.release( self.handle )
+
 
 class Graph( object ):
 
@@ -208,3 +239,5 @@ class Graph( object ):
     self.rangemap = rangemap
     self.handle = comm.new_graph( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows )
 
+  def __del__( self ):
+    self.comm.release( self.handle )
