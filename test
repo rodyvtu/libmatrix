@@ -33,6 +33,10 @@ def test( nprocs, size ):
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
 
+  print 'creating parameter list object'
+  params = libmatrix.ParameterList( comm )
+  params.set( 'H2G2', 42 )
+
   rowmap = libmatrix.Map( comm, globs=rowdofmap )
   domainmap = libmatrix.Map( comm, globs=domaindofmap )
 
@@ -109,6 +113,6 @@ def test( nprocs, size ):
 
 
 try:
-  test( nprocs=2, size=10 )
+  test( nprocs=2, size=50 )
 except:
   traceback.print_exc()

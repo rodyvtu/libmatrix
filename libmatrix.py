@@ -18,6 +18,7 @@ HANDLE = dtypes[ _info.pop('handle') ]
 SIZE   = dtypes[ _info.pop('size')   ]
 SCALAR = dtypes[ _info.pop('scalar') ]
 TOKEN  = dtypes[ 'char' ]
+CHAR   = dtypes[ 'char' ]
 
 assert not _info
 del _info
@@ -51,6 +52,8 @@ class LibMatrix( InterComm ):
   @bcast_token
   def map_new( self, globs ):
     map_handle = self.claim_handle()
+
+
     lengths = map( len, globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
     self.bcast( map_handle, HANDLE )
@@ -58,6 +61,19 @@ class LibMatrix( InterComm ):
     self.scatter( lengths, SIZE )
     self.scatterv( globs, GLOBAL )
     return map_handle
+
+  @bcast_token
+  def params_new( self ):
+    params_handle = self.claim_handle()
+    self.bcast( params_handle, HANDLE )
+    return params_handle
+
+  @bcast_token
+  def params_set_int( self, handle, key, value ):
+    self.bcast( handle, HANDLE )
+    self.bcast( len(key), SIZE )
+    self.bcast( key, CHAR )
+    #self.bcast( value, LOCAL )
 
   @bcast_token
   def vector_new( self, map_handle ):
@@ -148,6 +164,23 @@ class LibMatrix( InterComm ):
 
 #--- user facing objects ---
 
+class ParameterList( object ):
+
+  def __init__( self, comm ):
+    self.comm   = comm
+    self.handle = comm.params_new()
+
+  def __del__ ( self ):
+    self.comm.release( self.handle )
+
+  def set ( self, key, value ):
+
+    assert isinstance(key,str), 'Expected first argument to be a string'
+
+    if isinstance(value,int):
+      self.comm.params_set_int( self.handle, key, value )
+    else:
+      raise NotImplementedError( str(type(value)) + ' currently unsupported' )
 
 class Map( object ):
 

@@ -30,6 +30,8 @@ const MPI::Datatype MPI_SIZE = sizeof(size_t) == sizeof(int) ? MPI::INT : sizeof
 const MPI::Datatype MPI_LOCAL = MPI::INT;
 const MPI::Datatype MPI_GLOBAL = MPI::LONG;
 
+class DescribableParams : public Teuchos::Describable, public Teuchos::ParameterList {};
+
 typedef Kokkos::DefaultNode::DefaultNodeType node_t;
 typedef Tpetra::Map<local_t, global_t, node_t> map_t;
 typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
@@ -39,7 +41,7 @@ typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t, node_t> matrix_t;
 typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
 typedef Belos::SolverManager<scalar_t, multivector_t, operator_t> solvermanager_t;
 typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_t;
-typedef Teuchos::ParameterList params_t;
+typedef DescribableParams params_t;
 
 const global_t indexBase = 0;
 
@@ -101,6 +103,51 @@ inline void release_object( handle_t handle ) {
 
 /* LIBMATRIX API */
 
+/* NEW_PARAMS: create new parameter list
+   
+    -> broadcast 1 HANDLE params_handle
+*/
+void params_new( MPI::Intercomm intercomm ) {
+
+  struct { handle_t params; } handle;
+  intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
+
+  Teuchos::RCP<params_t> params = Teuchos::rcp( new params_t );
+
+  out(intercomm) << "creating parameter list #" << handle.params << std::endl;
+
+  set_object( handle.params, params );
+
+}
+
+/* PARAMS_SET_INT: set new integer in parameter list
+   
+    -> broadcast 1 HANDLE params_handle 
+    -> broadcast 1 SIZE length of key
+*/
+void params_set_int( MPI::Intercomm intercomm ) {
+
+  struct { handle_t params; } handle;
+  intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
+
+  size_t nchar;
+  intercomm.Bcast( (void *)(&nchar), 1, MPI_SIZE, 0 );
+
+  char *key = new char[nchar+1];
+  intercomm.Bcast( key, nchar, MPI::CHAR, 0 );
+  key[nchar] = 0;
+
+  const std::string skey ( key );
+
+  delete[] key;
+
+  out(intercomm) << "nchar=" << nchar << std::endl;
+  out(intercomm) << "adding key=" << skey << " with value=" << std::endl;
+
+  Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
+  params->set( skey, 42 );
+
+}
 
 /* RELEASE: release object
    
@@ -457,7 +504,8 @@ void matrix_solve( MPI::Intercomm intercomm ) {
 typedef void ( *funcptr )( MPI::Intercomm );
 #define TOKENS release, map_new, graph_new, \
   vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
-  matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve
+  matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve, \
+  params_new, params_set_int
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
