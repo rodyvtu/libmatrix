@@ -120,12 +120,16 @@ void params_new( MPI::Intercomm intercomm ) {
 
 }
 
-/* PARAMS_SET_INT: set new integer in parameter list
+/* PARAMS_SET: set new integer in parameter list
    
     -> broadcast 1 HANDLE params_handle 
-    -> broadcast 1 SIZE length of key
+    -> broadcast 1 SIZE length_of_key
+    -> broadcast length_of_key CHAR key
+    -> broadcast 1 TEMLATE_ARG value
 */
-void params_set_int( MPI::Intercomm intercomm ) {
+
+template <class dtype>
+void params_set ( MPI::Intercomm intercomm ) {
 
   struct { handle_t params; } handle;
   intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
@@ -133,20 +137,30 @@ void params_set_int( MPI::Intercomm intercomm ) {
   size_t nchar;
   intercomm.Bcast( (void *)(&nchar), 1, MPI_SIZE, 0 );
 
-  char *key = new char[nchar+1];
-  intercomm.Bcast( key, nchar, MPI::CHAR, 0 );
-  key[nchar] = 0;
+  std::string key ( nchar, 0 );
+  intercomm.Bcast( const_cast<char*>(key.data()), nchar, MPI::CHAR, 0 );
 
-  const std::string skey ( key );
-
-  delete[] key;
-
-  out(intercomm) << "nchar=" << nchar << std::endl;
-  out(intercomm) << "adding key=" << skey << " with value=" << std::endl;
+  dtype value;
+  intercomm.Bcast( (void *)(&value), sizeof(value), MPI::CHAR, 0 );
 
   Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
-  params->set( skey, 42 );
+  params->set( key, value );
 
+  out(intercomm) << "added key=" << key << " with value=" << value << std::endl;
+}
+
+/* PARAMS_PRINT: print the params list (c-sided)
+   
+    -> broadcast 1 HANDLE params_handle 
+*/
+
+void params_print ( MPI::Intercomm intercomm ) {
+
+  struct { handle_t params; } handle;
+  intercomm.Bcast( (void *)(&handle), 1, MPI_HANDLE, 0 );
+
+  Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
+  params->print( out(intercomm) );
 }
 
 /* RELEASE: release object
@@ -505,7 +519,7 @@ typedef void ( *funcptr )( MPI::Intercomm );
 #define TOKENS release, map_new, graph_new, \
   vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
   matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve, \
-  params_new, params_set_int
+  params_new, params_set<int>, params_set<double>, params_print
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))

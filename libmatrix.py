@@ -2,10 +2,27 @@ import numpy, os
 from mpi import InterComm, dtypes
 
 
-_info = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
+_info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
+_names = _info.pop('token')[5:-1].split(', ')
 
-def bcast_token( func, names=_info.pop('token')[5:-1].split(', ') ):
-  token = chr( names.index( func.func_name ) )
+def bcast_token_template( template_var_arg ):
+  def bcast_token( func ):
+    token_map = {}
+    for token,name in enumerate(_names):
+      parts = name.split('<')
+      if len(parts) == 2 and parts[0] == func.func_name and parts[1].endswith('>'):
+        key = eval(parts[1][:-1] if parts[1][:-1]!='double' else 'float')
+        token_map[key] = token
+    def wrapped( self, *args ):
+      assert self.isconnected(), 'connection is closed'
+      template_arg = args[template_var_arg]
+      self.bcast( chr(token_map[type(template_arg)]), TOKEN )
+      return func( self, *args )
+    return wrapped    
+  return bcast_token 
+
+def bcast_token( func ):
+  token = chr( _names.index( func.func_name ) )
   def wrapped( self, *args, **kwargs ):
     assert self.isconnected(), 'connection is closed'
     self.bcast( token, TOKEN )
@@ -68,12 +85,16 @@ class LibMatrix( InterComm ):
     self.bcast( params_handle, HANDLE )
     return params_handle
 
-  @bcast_token
-  def params_set_int( self, handle, key, value ):
+  @bcast_token_template( 2 )
+  def params_set( self, handle, key, value ):
     self.bcast( handle, HANDLE )
     self.bcast( len(key), SIZE )
     self.bcast( key, CHAR )
-    #self.bcast( value, LOCAL )
+    self.bcast( value, LOCAL if isinstance(value,int) else SCALAR )
+
+  @bcast_token
+  def params_print( self, handle ):
+    self.bcast( handle, HANDLE )
 
   @bcast_token
   def vector_new( self, map_handle ):
@@ -173,14 +194,13 @@ class ParameterList( object ):
   def __del__ ( self ):
     self.comm.release( self.handle )
 
+  def cprint ( self ):
+    self.comm.params_print( self.handle )
+
   def set ( self, key, value ):
-
     assert isinstance(key,str), 'Expected first argument to be a string'
-
-    if isinstance(value,int):
-      self.comm.params_set_int( self.handle, key, value )
-    else:
-      raise NotImplementedError( str(type(value)) + ' currently unsupported' )
+    assert isinstance(value,float) or isinstance(value,int), 'Current implementation supports int and float only'
+    self.comm.params_set( self.handle, key, value )
 
 class Map( object ):
 

@@ -36,6 +36,9 @@ def test( nprocs, size ):
   print 'creating parameter list object'
   params = libmatrix.ParameterList( comm )
   params.set( 'H2G2', 42 )
+  params.set( 'pi', numpy.pi )
+
+  params.cprint()
 
   rowmap = libmatrix.Map( comm, globs=rowdofmap )
   domainmap = libmatrix.Map( comm, globs=domaindofmap )
@@ -106,13 +109,18 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
+  solverParams = libmatrix.ParameterList( comm )
+  solverParams.set( "Num Blocks", 40 );
+  solverParams.set( "Maximum Iterations", 400 );
+  solverParams.set( "Convergence Tolerance", 1.0e-8 );
+  solverParams.cprint()
+
   vv = A.solve( w )
 
   print 'solve result:', vv.toarray()
   print 'difference:', v.toarray() - vv.toarray()
 
-
 try:
-  test( nprocs=2, size=50 )
+  test( nprocs=2, size=10 )
 except:
   traceback.print_exc()
