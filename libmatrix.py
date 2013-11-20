@@ -1,5 +1,5 @@
 import numpy, os
-from mpi import InterComm, dtypes
+from mpi import InterComm
 
 
 _info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
@@ -29,13 +29,13 @@ def bcast_token( func ):
     return func( self, *args, **kwargs )
   return wrapped
 
-LOCAL  = dtypes[ _info.pop('local')  ]
-GLOBAL = dtypes[ _info.pop('global') ]
-HANDLE = dtypes[ _info.pop('handle') ]
-SIZE   = dtypes[ _info.pop('size')   ]
-SCALAR = dtypes[ _info.pop('scalar') ]
-TOKEN  = dtypes[ 'char' ]
-CHAR   = dtypes[ 'char' ]
+LOCAL  = getattr( numpy, _info.pop('local') )
+GLOBAL = getattr( numpy, _info.pop('global') )
+HANDLE = getattr( numpy, _info.pop('handle') )
+SIZE   = getattr( numpy, _info.pop('size') )
+SCALAR = getattr( numpy, _info.pop('scalar') )
+TOKEN  = numpy.character
+CHAR   = numpy.character
 
 assert not _info
 del _info

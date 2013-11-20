@@ -2,6 +2,7 @@
 
 libmatrix.mpi: libmatrix.cpp
 	mpic++ $< -o $@ \
+	  -std=c++11 \
 	  -DDEBUG \
 	  -ltpetra \
 	  -lbelos \
