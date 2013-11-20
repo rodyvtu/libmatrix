@@ -103,7 +103,8 @@ inline void release_object( handle_t handle ) {
 
 /* LIBMATRIX API */
 
-/* NEW_PARAMS: create new parameter list
+
+/* PARAMS_NEW: create new parameter list
    
     -> broadcast 1 HANDLE params_handle
 */
@@ -120,6 +121,7 @@ void params_new( MPI::Intercomm intercomm ) {
 
 }
 
+
 /* PARAMS_SET: set new integer in parameter list
    
     -> broadcast 1 HANDLE params_handle 
@@ -127,8 +129,7 @@ void params_new( MPI::Intercomm intercomm ) {
     -> broadcast length_of_key CHAR key
     -> broadcast 1 TEMLATE_ARG value
 */
-
-template <class dtype>
+template <class T>
 void params_set ( MPI::Intercomm intercomm ) {
 
   struct { handle_t params; } handle;
@@ -137,23 +138,23 @@ void params_set ( MPI::Intercomm intercomm ) {
   size_t nchar;
   intercomm.Bcast( (void *)(&nchar), 1, MPI_SIZE, 0 );
 
-  std::string key ( nchar, 0 );
-  intercomm.Bcast( const_cast<char*>(key.data()), nchar, MPI::CHAR, 0 );
+  std::string key( nchar, 0 );
+  intercomm.Bcast( (void *)(const_cast<char*>(key.data())), nchar, MPI::CHAR, 0 );
 
-  dtype value;
-  intercomm.Bcast( (void *)(&value), sizeof(value), MPI::CHAR, 0 );
+  T value;
+  intercomm.Bcast( (void *)(&value), sizeof(T), MPI::BYTE, 0 );
 
   Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
   params->set( key, value );
 
-  out(intercomm) << "added key=" << key << " with value=" << value << std::endl;
+  out(intercomm) << "added key=\"" << key << "\" with value=" << value << std::endl;
 }
+
 
 /* PARAMS_PRINT: print the params list (c-sided)
    
     -> broadcast 1 HANDLE params_handle 
 */
-
 void params_print ( MPI::Intercomm intercomm ) {
 
   struct { handle_t params; } handle;
@@ -162,6 +163,7 @@ void params_print ( MPI::Intercomm intercomm ) {
   Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
   params->print( out(intercomm) );
 }
+
 
 /* RELEASE: release object
    
