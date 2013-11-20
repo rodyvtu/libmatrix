@@ -190,14 +190,21 @@ class LibMatrix( InterComm ):
 
 #--- user facing objects ---
 
-class ParameterList( object ):
 
-  def __init__( self, comm ):
-    self.comm   = comm
-    self.handle = comm.params_new()
+class Object( object ):
+
+  def __init__( self, comm, handle ):
+    self.comm = comm
+    self.handle = handle
 
   def __del__ ( self ):
     self.comm.release( self.handle )
+
+
+class ParameterList( Object ):
+
+  def __init__( self, comm ):
+    Object.__init__( self, comm, comm.params_new() )
 
   def cprint ( self ):
     self.comm.params_print( self.handle )
@@ -207,26 +214,22 @@ class ParameterList( object ):
     assert isinstance(value,float) or isinstance(value,int), 'Current implementation supports int and float only'
     self.comm.params_set( self.handle, key, value )
 
-class Map( object ):
+
+class Map( Object ):
 
   def __init__( self, comm, globs ):
-    self.comm = comm
     assert len(globs) == comm.size
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
-    self.handle = comm.map_new( globs )
-
-  def __del__( self ):
-    self.comm.release( self.handle )
+    Object.__init__( self, comm, comm.map_new( globs ) )
 
 
-class Vector( object ):
+class Vector( Object ):
 
   def __init__( self, comm, size, mp ):
-    self.comm = comm
     self.size = size
     assert isinstance( mp, Map )
     self.mp = mp
-    self.handle = comm.vector_new( mp.handle )
+    Object.__init__( self, comm, comm.vector_new( mp.handle ) )
 
   def add( self, rank, idx, data ):
     self.comm.vector_add_block( self.handle, rank, idx, data )
@@ -242,18 +245,14 @@ class Vector( object ):
     assert self.size == other.size
     return self.comm.vector_dot( self.handle, other.handle )
 
-  def __del__( self ):
-    self.comm.release( self.handle )
 
-
-class Matrix( object ):
+class Matrix( Object ):
 
   def __init__( self, comm, shape, graph ):
-    self.comm = comm
     self.shape = shape
     assert isinstance( graph, Graph )
     self.graph = graph
-    self.handle = comm.matrix_new( graph.handle )
+    Object.__init__( self, comm, comm.matrix_new( graph.handle ) )
 
   def add( self, rank, rowidx, colidx, data ):
     self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
@@ -279,14 +278,10 @@ class Matrix( object ):
     self.comm.matrix_solve( self.handle, rhs.handle, lhs.handle )
     return lhs
 
-  def __del__( self ):
-    self.comm.release( self.handle )
 
-
-class Graph( object ):
+class Graph( Object ):
 
   def __init__( self, comm, rowmap, columnmap, domainmap, rangemap, rows ):
-    self.comm = comm
     assert isinstance( rowmap, Map )
     assert isinstance( columnmap, Map )
     assert isinstance( domainmap, Map )
@@ -295,7 +290,4 @@ class Graph( object ):
     self.columnmap = columnmap
     self.domainmap = domainmap
     self.rangemap = rangemap
-    self.handle = comm.graph_new( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows )
-
-  def __del__( self ):
-    self.comm.release( self.handle )
+    Object.__init__( self, comm, comm.graph_new( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows ) )
