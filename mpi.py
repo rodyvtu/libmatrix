@@ -12,8 +12,11 @@ class InterComm( object ):
   def isconnected( self ):
     return bool( self.__comm )
 
-  def bcast( self, data, dtype ):
-    data = numpy.asarray( data, dtype )
+  def bcast( self, data, dtype=None ):
+    if dtype is not None:
+      data = numpy.asarray( data, dtype )
+    else:
+      assert isinstance( data, numpy.ndarray )
     self.__comm.Bcast( [ data, MPI.BYTE ], root=MPI.ROOT )
   
   def gather( self, dtype ):

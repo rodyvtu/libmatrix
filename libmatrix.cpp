@@ -21,9 +21,11 @@ Teuchos::oblackholestream blackHole;
 class DescribableParams : public Teuchos::Describable, public Teuchos::ParameterList {};
 
 typedef double scalar_t;
+typedef int number_t;
 typedef int handle_t;
 typedef int local_t;
 typedef long global_t;
+typedef uint8_t token_t;
 typedef Kokkos::DefaultNode::DefaultNodeType node_t;
 typedef Tpetra::Map<local_t, global_t, node_t> map_t;
 typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
@@ -150,10 +152,10 @@ void params_new( MPI::Intercomm intercomm ) {
 
 /* PARAMS_SET: set new integer in parameter list
    
-    -> broadcast 1 HANDLE params_handle 
-    -> broadcast 1 SIZE length_of_key
-    -> broadcast length_of_key CHAR key
-    -> broadcast 1 TEMLATE_ARG value
+    -> broadcast HANDLE params_handle 
+    -> broadcast SIZE length_of_key
+    -> broadcast CHAR key[length_of_key]
+    -> broadcast TEMLATE_ARG value
 */
 template <class T>
 void params_set ( MPI::Intercomm intercomm ) {
@@ -547,7 +549,7 @@ typedef void ( *funcptr )( MPI::Intercomm );
 #define TOKENS release, map_new, graph_new, \
   vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
   matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve, \
-  params_new, params_set<int>, params_set<double>, params_print
+  params_new, params_set<number_t>, params_set<scalar_t>, params_print
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))
@@ -563,7 +565,7 @@ void eventloop( char *progname ) {
   MPI::COMM_WORLD.Set_errhandler( MPI::ERRORS_THROW_EXCEPTIONS );
   MPI::Intercomm intercomm = MPI::Comm::Get_parent();
 
-  unsigned char c;
+  token_t c;
   for ( ;; ) {
     out(intercomm) << "waiting\n";
     Bcast( intercomm, &c );
@@ -583,12 +585,14 @@ void eventloop( char *progname ) {
 int main( int argc, char *argv[] ) {
 
   if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
-    std::cout << "token: enum" << STR(TOKENS) << std::endl;
-    std::cout << "local: int" << (sizeof(local_t) << 3) << std::endl;
-    std::cout << "global: int" << (sizeof(global_t) << 3) << std::endl;
-    std::cout << "size: int" << (sizeof(size_t) << 3) << std::endl;
-    std::cout << "handle: int" << (sizeof(handle_t) << 3) << std::endl;
-    std::cout << "scalar: float" << (sizeof(scalar_t) << 3) << std::endl;
+    std::cout << "tokens: " << STR(TOKENS) << std::endl;
+    std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;
+    std::cout << "local_t: int" << (sizeof(local_t) << 3) << std::endl;
+    std::cout << "global_t: int" << (sizeof(global_t) << 3) << std::endl;
+    std::cout << "size_t: uint" << (sizeof(size_t) << 3) << std::endl;
+    std::cout << "handle_t: int" << (sizeof(handle_t) << 3) << std::endl;
+    std::cout << "number_t: int" << (sizeof(number_t) << 3) << std::endl;
+    std::cout << "scalar_t: float" << (sizeof(scalar_t) << 3) << std::endl;
   }
   else if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
     eventloop( argv[0] );

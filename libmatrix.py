@@ -3,41 +3,48 @@ from mpi import InterComm
 
 
 _info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
-_names = _info.pop('token')[5:-1].split(', ')
+_names = _info.pop('tokens')[1:-1].split(', ')
+
+local_t  = numpy.dtype( _info.pop( 'local_t'  ) )
+global_t = numpy.dtype( _info.pop( 'global_t' ) )
+handle_t = numpy.dtype( _info.pop( 'handle_t' ) )
+size_t   = numpy.dtype( _info.pop( 'size_t'   ) )
+scalar_t = numpy.dtype( _info.pop( 'scalar_t' ) )
+number_t = numpy.dtype( _info.pop( 'number_t' ) )
+token_t  = numpy.dtype( _info.pop( 'token_t'  ) )
+char_t   = numpy.dtype( 'str' )
 
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
-    token_map = {}
-    for token,name in enumerate(_names):
-      parts = name.split('<')
-      if len(parts) == 2 and parts[0] == func.func_name and parts[1].endswith('>'):
-        key = eval(parts[1][:-1] if parts[1][:-1]!='double' else 'float')
-        token_map[key] = token
+    int_token = _names.index( func.func_name + '<number_t>' )
+    float_token = _names.index( func.func_name + '<scalar_t>' )
     def wrapped( self, *args ):
       assert self.isconnected(), 'connection is closed'
       template_arg = args[template_var_arg]
-      self.bcast( chr(token_map[type(template_arg)]), TOKEN )
+      if isinstance( template_arg, int ):
+        token = int_token
+        dtype = number_t
+      elif isinstance( template_arg, float ):
+        token = float_token
+        dtype = scalar_t
+      else:
+        raise Exception, 'invalid argument for function %r: %r' % ( func.func_name, template_arg )
+      template_arg = numpy.asarray( template_arg, dtype=dtype )
+      self.bcast( token, token_t )
+      args = args[:template_var_arg] + (template_arg,) + args[template_var_arg+1:]
       return func( self, *args )
     return wrapped    
   return bcast_token 
 
 def bcast_token( func ):
-  token = chr( _names.index( func.func_name ) )
+  token = _names.index( func.func_name )
   def wrapped( self, *args, **kwargs ):
     assert self.isconnected(), 'connection is closed'
-    self.bcast( token, TOKEN )
+    self.bcast( token, token_t )
     return func( self, *args, **kwargs )
   return wrapped
 
-LOCAL  = getattr( numpy, _info.pop('local') )
-GLOBAL = getattr( numpy, _info.pop('global') )
-HANDLE = getattr( numpy, _info.pop('handle') )
-SIZE   = getattr( numpy, _info.pop('size') )
-SCALAR = getattr( numpy, _info.pop('scalar') )
-TOKEN  = numpy.character
-CHAR   = numpy.character
-
-assert not _info
+assert not _info, 'leftover info: %s' % _info
 del _info
 
 
@@ -64,78 +71,76 @@ class LibMatrix( InterComm ):
 
   @bcast_token
   def release( self, handle ):
-    self.bcast( handle, HANDLE )
+    self.bcast( handle, handle_t )
 
   @bcast_token
   def map_new( self, globs ):
     map_handle = self.claim_handle()
-
-
     lengths = map( len, globs )
     size = sum( lengths ) # TODO check meaning of size in map constructor
-    self.bcast( map_handle, HANDLE )
-    self.bcast( size, SIZE )
-    self.scatter( lengths, SIZE )
-    self.scatterv( globs, GLOBAL )
+    self.bcast( map_handle, handle_t )
+    self.bcast( size, size_t )
+    self.scatter( lengths, size_t )
+    self.scatterv( globs, global_t )
     return map_handle
 
   @bcast_token
   def params_new( self ):
     params_handle = self.claim_handle()
-    self.bcast( params_handle, HANDLE )
+    self.bcast( params_handle, handle_t )
     return params_handle
 
   @bcast_token_template( 2 )
   def params_set( self, handle, key, value ):
-    self.bcast( handle, HANDLE )
-    self.bcast( len(key), SIZE )
-    self.bcast( key, CHAR )
-    self.bcast( value, LOCAL if isinstance(value,int) else SCALAR )
+    self.bcast( handle, handle_t )
+    self.bcast( len(key), size_t )
+    self.bcast( key, char_t )
+    self.bcast( value )
 
   @bcast_token
   def params_print( self, handle ):
-    self.bcast( handle, HANDLE )
+    self.bcast( handle, handle_t )
 
   @bcast_token
   def vector_new( self, map_handle ):
     vec_handle = self.claim_handle()
-    self.bcast( [ vec_handle, map_handle ], HANDLE )
+    self.bcast( [ vec_handle, map_handle ], handle_t )
     return vec_handle
 
   @bcast_token
   def vector_add_block( self, handle, rank, idx, data ):
     n = len(idx)
     assert len(data) == n
-    self.bcast( rank, SIZE )
-    self.send( rank, handle, HANDLE )
-    self.send( rank, n, SIZE )
-    self.send( rank, idx, GLOBAL )
-    self.send( rank, data, SCALAR )
+    self.bcast( rank, size_t )
+    self.send( rank, handle, handle_t )
+    self.send( rank, n, size_t )
+    self.send( rank, idx, global_t )
+    self.send( rank, data, scalar_t )
 
   @bcast_token
   def vector_getdata( self, vec_handle, size, globs ):
-    self.bcast( vec_handle, HANDLE )
+    self.bcast( vec_handle, handle_t )
     array = numpy.zeros( size ) # TODO fix length
     lengths = map( len, globs )
-    local_arrays = self.gatherv( lengths, SCALAR )
+    local_arrays = self.gatherv( lengths, scalar_t )
     for idx, local_array in zip( globs, local_arrays ):
       array[idx] += local_array
     return array
 
   @bcast_token
   def vector_norm( self, handle ):
-    self.bcast( handle, HANDLE )
-    return self.gather_equal( SCALAR )
+    self.bcast( handle, handle_t )
+    return self.gather_equal( scalar_t )
 
   @bcast_token
   def vector_dot( self, handle1, handle2 ):
-    self.bcast( [ handle1, handle2 ], HANDLE )
-    return self.gather_equal( SCALAR )
+    self.bcast( [ handle1, handle2 ], handle_t )
+    return self.gather_equal( scalar_t )
 
   @bcast_token
   def matrix_new( self, graph_handle ):
     matrix_handle = self.claim_handle()
-    self.bcast( [ matrix_handle, graph_handle ], HANDLE )
+    self.bcast( [ matrix_handle, graph_handle ], handle_t )
     return matrix_handle
 
   @bcast_token
@@ -143,43 +148,43 @@ class LibMatrix( InterComm ):
     data = numpy.asarray(data)
     shape = len(rowidx), len(colidx)
     assert data.shape == shape
-    self.bcast( rank, SIZE )
-    self.send( rank, handle, HANDLE )
-    self.send( rank, shape, SIZE )
+    self.bcast( rank, size_t )
+    self.send( rank, handle, handle_t )
+    self.send( rank, shape, size_t )
     print rowidx, colidx
-    self.send( rank, rowidx, GLOBAL )
-    self.send( rank, colidx, GLOBAL )
-    self.send( rank, data.ravel(), SCALAR )
+    self.send( rank, rowidx, global_t )
+    self.send( rank, colidx, global_t )
+    self.send( rank, data.ravel(), scalar_t )
 
   @bcast_token
   def matrix_fillcomplete( self, handle ):
-    self.bcast( handle, HANDLE )
+    self.bcast( handle, handle_t )
 
   @bcast_token
   def matrix_norm( self, handle ):
-    self.bcast( handle, HANDLE )
-    return self.gather_equal( SCALAR )
+    self.bcast( handle, handle_t )
+    return self.gather_equal( scalar_t )
 
   @bcast_token
   def matrix_apply( self, matrix_handle, vec_handle, out_handle ):
-    self.bcast( [ matrix_handle, vec_handle, out_handle ], HANDLE )
+    self.bcast( [ matrix_handle, vec_handle, out_handle ], handle_t )
 
   @bcast_token
   def graph_new( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
     graph_handle = self.claim_handle()
-    self.bcast( [ graph_handle, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], HANDLE )
+    self.bcast( [ graph_handle, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], handle_t )
     offsets = [ numpy.cumsum( [0] + map( len, row ) ) for row in rows ]
-    self.scatterv( offsets, SIZE )
+    self.scatterv( offsets, size_t )
     cols = [ numpy.concatenate( row ) for row in rows ]
-    self.scatterv( cols, LOCAL )
+    self.scatterv( cols, local_t )
     return graph_handle
 
   @bcast_token
   def matrix_solve( self, matrix_handle, rhs_handle, lhs_handle ):
-    self.bcast( [ matrix_handle, rhs_handle, lhs_handle ], HANDLE )
+    self.bcast( [ matrix_handle, rhs_handle, lhs_handle ], handle_t )
 
   def __del__( self ):
-    self.bcast( '\xff', TOKEN )
+    self.bcast( -1, token_t )
     InterComm.__del__( self )
 
 
