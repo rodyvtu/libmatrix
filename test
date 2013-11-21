@@ -74,7 +74,8 @@ def test( nprocs, size ):
 
   A = libmatrix.Matrix( comm, (size,size), graph )
   for iproc, dofs in enumerate( rowdofmap ):
-    for idx in zip( dofs[:-1], dofs[1:] ):
+    for i in range( len(dofs)-1 ):
+      idx = i, i+1
       print 'adding block to ', idx, ' on proc', iproc
       A.add( rank=iproc, rowidx=idx, colidx=idx, data=block )
 

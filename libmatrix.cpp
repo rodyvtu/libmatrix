@@ -285,7 +285,7 @@ void vector_add_block( MPI::Intercomm intercomm ) {
 
   out(intercomm) << "ivec = " << handle.vector << ", nitems = " << nitems << std::endl;
 
-  Teuchos::ArrayRCP<global_t> idx( nitems );
+  Teuchos::ArrayRCP<local_t> idx( nitems );
   Teuchos::ArrayRCP<scalar_t> data( nitems );
 
   Recv( intercomm, idx.getRawPtr(), nitems );
@@ -433,8 +433,8 @@ void matrix_add_block( MPI::Intercomm intercomm ) {
 
   out(intercomm) << "imat = " << handle.matrix << ", nitems = " << nitems[0] << "," << nitems[1] << std::endl;
 
-  Teuchos::ArrayRCP<global_t> rowidx( nitems[0] );
-  Teuchos::ArrayRCP<global_t> colidx( nitems[1] );
+  Teuchos::ArrayRCP<local_t> rowidx( nitems[0] );
+  Teuchos::ArrayRCP<local_t> colidx( nitems[1] );
   Teuchos::ArrayRCP<scalar_t> data( nitems[0]*nitems[1] );
 
   Recv( intercomm, rowidx.getRawPtr(), nitems[0] );
@@ -443,9 +443,9 @@ void matrix_add_block( MPI::Intercomm intercomm ) {
 
   Teuchos::RCP<matrix_t> mat = get_object<matrix_t>( handle.matrix );
 
-  const Teuchos::ArrayView<const global_t> colidx_view = colidx.view( 0, nitems[1] );
+  const Teuchos::ArrayView<const local_t> colidx_view = colidx.view( 0, nitems[1] );
   for ( int i = 0; i < nitems[0]; i++ ) {
-    mat->sumIntoGlobalValues( rowidx[i], colidx_view, data.view(i*nitems[0],nitems[1]) );
+    mat->sumIntoLocalValues( rowidx[i], colidx_view, data.view(i*nitems[0],nitems[1]) );
   }
 
 }
