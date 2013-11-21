@@ -53,7 +53,7 @@ def test( nprocs, size ):
   for iproc, dofs in enumerate( domaindofmap ):
     values = v_npy[dofs]
     print 'adding', values, ' to ', dofs, ' on proc', iproc
-    v.add( rank=iproc, idx=dofs, data=values )
+    v.add( rank=iproc, idx=range(len(dofs)), data=values )
 
 # for iproc, dofs in enumerate( rowdofmap ):
 #   values = (numpy.array(dofs)+1)*10
@@ -96,7 +96,7 @@ def test( nprocs, size ):
   vectors = []
   numbers = []
   for iproc, dofs in enumerate(domaindofmap):
-    for idof in dofs:
+    for idof in range(len(dofs)):
       ei = libmatrix.Vector( comm, size, domainmap )
       ei.add( rank=iproc, idx=[idof], data=[1] )
       print 'unit vector iproc=%d idof=%d:' % (iproc,idof), ei.toarray()

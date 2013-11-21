@@ -295,7 +295,7 @@ void vector_add_block( MPI::Intercomm intercomm ) {
 
   for ( int i = 0; i < nitems; i++ ) {
     out(intercomm) << idx[i] << " : " << data[i] << std::endl;
-    vec->sumIntoGlobalValue( idx[i], data[i] );
+    vec->sumIntoLocalValue( idx[i], data[i] );
   }
 
 }
