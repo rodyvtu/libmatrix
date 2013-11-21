@@ -362,17 +362,15 @@ void vector_norm( MPI::Intercomm intercomm ) {
 */
 void graph_new( MPI::Intercomm intercomm ) {
 
-  struct { handle_t graph, rowmap, colmap, domainmap, rangemap; } handle;
+  struct { handle_t graph, rowmap, colmap; } handle;
   Bcast( intercomm, &handle );
 
   Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
   Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
-  Teuchos::RCP<const map_t> dommap = get_object<const map_t>( handle.domainmap );
-  Teuchos::RCP<const map_t> rngmap = get_object<const map_t>( handle.rangemap );
 
   size_t nrows = rowmap->getNodeNumElements();
 
-  out(intercomm) << "creating graph #" << handle.graph << " from rowmap #" << handle.rowmap << ", colmap #" << handle.colmap << ", domainmap #" << handle.domainmap << ", rangemap #" << handle.rangemap << " with " << nrows << " rows" << std::endl;
+  out(intercomm) << "creating graph #" << handle.graph << " from rowmap #" << handle.rowmap << ", colmap #" << handle.colmap << " with " << nrows << " rows" << std::endl;
 
   Teuchos::ArrayRCP<size_t> offsets( nrows+1 );
   Scatterv( intercomm, offsets.getRawPtr(), nrows+1 );
@@ -382,7 +380,7 @@ void graph_new( MPI::Intercomm intercomm ) {
   Scatterv( intercomm, indices.getRawPtr(), nindices );
 
   Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( rowmap, colmap, offsets, indices ) );
-  graph->fillComplete( dommap, rngmap );
+  graph->fillComplete();
 
   set_object( handle.graph, graph );
 }
@@ -453,23 +451,23 @@ void matrix_add_block( MPI::Intercomm intercomm ) {
 }
 
 
-/* MATRIX_FILLCOMPLETE: set matrix to fill-complete
+/* MATRIX_COMPLETE: set matrix to fill-complete
    
      -> broadcast HANDLE handle.{matrix,exporter}
 */
-void matrix_fillcomplete( MPI::Intercomm intercomm ) {
+void matrix_complete( MPI::Intercomm intercomm ) {
 
   struct { handle_t matrix, exporter; } handle;
   Bcast( intercomm, &handle );
 
   Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
   Teuchos::RCP<const export_t> exporter = get_object<const export_t>( handle.exporter );
+  Teuchos::RCP<const map_t> domainmap = exporter->getTargetMap();
+  Teuchos::RCP<const map_t> rangemap = exporter->getTargetMap();
 
   out(intercomm) << "completing matrix #" << handle.matrix << std::endl;
 
-  //matrix->fillComplete( matrix->getDomainMap(), matrix->getRangeMap() );
-
-  Teuchos::RCP<matrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter );
+  Teuchos::RCP<matrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
 
   release_object( handle.matrix );
   set_object( handle.matrix, completed_matrix );
@@ -622,7 +620,7 @@ void export_new( MPI::Intercomm intercomm ) {
 typedef void ( *funcptr )( MPI::Intercomm );
 #define TOKENS release, \
   vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
-  matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve, \
+  matrix_new, matrix_add_block, matrix_complete, matrix_norm, matrix_apply, matrix_solve, \
   params_new, params_set<number_t>, params_set<scalar_t>, params_print, \
   map_new, graph_new, precon_new, export_new
 

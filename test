@@ -70,7 +70,7 @@ def test( nprocs, size ):
   print 'resulting norm:', norm
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
-  graph = libmatrix.Graph( comm, rowmap, rowmap, domainmap, domainmap, rows=nzmap )
+  graph = libmatrix.Graph( comm, rowmap, rowmap, rows=nzmap )
 
   A = libmatrix.Matrix( comm, (size,size), graph )
   for iproc, dofs in enumerate( rowdofmap ):

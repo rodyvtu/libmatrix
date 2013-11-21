@@ -169,7 +169,7 @@ class LibMatrix( InterComm ):
     self.send( rank, data.ravel(), scalar_t )
 
   @bcast_token
-  def matrix_fillcomplete( self, matrix_handle, export_handle ):
+  def matrix_complete( self, matrix_handle, export_handle ):
     self.bcast( [ matrix_handle, export_handle ], handle_t )
 
   @bcast_token
@@ -182,9 +182,9 @@ class LibMatrix( InterComm ):
     self.bcast( [ matrix_handle, vec_handle, out_handle ], handle_t )
 
   @bcast_token
-  def graph_new( self, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle, rows ):
+  def graph_new( self, rowmap_handle, colmap_handle, rows ):
     graph_handle = self.claim_handle()
-    self.bcast( [ graph_handle, rowmap_handle, colmap_handle, dommap_handle, rngmap_handle ], handle_t )
+    self.bcast( [ graph_handle, rowmap_handle, colmap_handle ], handle_t )
     offsets = [ numpy.cumsum( [0] + map( len, row ) ) for row in rows ]
     self.scatterv( offsets, size_t )
     cols = [ numpy.concatenate( row ) for row in rows ]
@@ -237,17 +237,17 @@ class Map( Object ):
 
 class Vector( Object ):
 
-  def __init__( self, comm, size, mp ):
+  def __init__( self, comm, size, map ):
     self.size = size
-    assert isinstance( mp, Map )
-    self.mp = mp
-    Object.__init__( self, comm, comm.vector_new( mp.handle ) )
+    assert isinstance( map, Map )
+    self.map = map
+    Object.__init__( self, comm, comm.vector_new( map.handle ) )
 
   def add( self, rank, idx, data ):
     self.comm.vector_add_block( self.handle, rank, idx, data )
 
   def toarray( self ):
-    return self.comm.vector_getdata( self.handle, self.size, self.mp.globs )
+    return self.comm.vector_getdata( self.handle, self.size, self.map.globs )
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
@@ -283,16 +283,18 @@ class Matrix( Operator ):
 
   def complete( self, exporter ):
     assert isinstance( exporter, Export )
-    self.comm.matrix_fillcomplete( self.handle, exporter.handle )
+    assert self.graph.rowmap == exporter.srcmap
+    self.comm.matrix_complete( self.handle, exporter.handle )
+    self.domainmap = self.rangemap = exporter.dstmap
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
 
   def matvec( self, vec ):
     assert isinstance( vec, Vector )
-    assert vec.mp == self.graph.domainmap
+    assert vec.map == self.domainmap
     assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.shape[0], self.graph.rangemap )
+    out = Vector( self.comm, self.shape[0], self.rangemap )
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
@@ -300,7 +302,7 @@ class Matrix( Operator ):
     assert isinstance( precon, Operator )
     assert isinstance( rhs, Vector )
     assert self.shape[0] == rhs.size
-    lhs = Vector( self.comm, self.shape[1], self.graph.domainmap )
+    lhs = Vector( self.comm, self.shape[1], self.domainmap )
     self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle )
     return lhs
 
@@ -317,13 +319,9 @@ class Export( Object ):
 
 class Graph( Object ):
 
-  def __init__( self, comm, rowmap, columnmap, domainmap, rangemap, rows ):
+  def __init__( self, comm, rowmap, colmap, rows ):
     assert isinstance( rowmap, Map )
-    assert isinstance( columnmap, Map )
-    assert isinstance( domainmap, Map )
-    assert isinstance( rangemap, Map )
+    assert isinstance( colmap, Map )
     self.rowmap = rowmap
-    self.columnmap = columnmap
-    self.domainmap = domainmap
-    self.rangemap = rangemap
-    Object.__init__( self, comm, comm.graph_new( rowmap.handle, columnmap.handle, domainmap.handle, rangemap.handle, rows ) )
+    self.colmap = colmap
+    Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
