@@ -11,6 +11,8 @@
 #include <Teuchos_DefaultMpiComm.hpp>
 #include <Teuchos_oblackholestream.hpp>
 
+#include <Ifpack2_Factory.hpp>
+
 #include <mpi.h>
 
   
@@ -36,8 +38,11 @@ typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
 typedef Belos::SolverManager<scalar_t, multivector_t, operator_t> solvermanager_t;
 typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_t;
 typedef DescribableParams params_t;
+typedef Ifpack2::Preconditioner<scalar_t, local_t, global_t, node_t> precon_t;
+typedef Teuchos::ScalarTraits<scalar_t>::magnitudeType magnitude_t;
+typedef Tpetra::Export<local_t, global_t, node_t> export_t;
 
-const global_t indexBase = 0;
+const global_t indexbase = 0;
 
 /* MISC HELPER FUNCTIONS */
 
@@ -228,7 +233,7 @@ void map_new( MPI::Intercomm intercomm ) {
 
   Teuchos::RCP<node_t> node = Kokkos::DefaultNode::getDefaultNode ();
   Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
-  Teuchos::RCP<map_t> map = Teuchos::rcp( new map_t( size, elementList, indexBase, comm, node ) );
+  Teuchos::RCP<map_t> map = Teuchos::rcp( new map_t( size, elementList, indexbase, comm, node ) );
 
   set_object( handle.map, map );
 }
@@ -450,17 +455,24 @@ void matrix_add_block( MPI::Intercomm intercomm ) {
 
 /* MATRIX_FILLCOMPLETE: set matrix to fill-complete
    
-     -> broadcast HANDLE handle.matrix
+     -> broadcast HANDLE handle.{matrix,exporter}
 */
 void matrix_fillcomplete( MPI::Intercomm intercomm ) {
 
-  struct { handle_t matrix; } handle;
+  struct { handle_t matrix, exporter; } handle;
   Bcast( intercomm, &handle );
-  Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
+
+  Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
+  Teuchos::RCP<const export_t> exporter = get_object<const export_t>( handle.exporter );
 
   out(intercomm) << "completing matrix #" << handle.matrix << std::endl;
 
-  matrix->fillComplete( matrix->getDomainMap(), matrix->getRangeMap() );
+  //matrix->fillComplete( matrix->getDomainMap(), matrix->getRangeMap() );
+
+  Teuchos::RCP<matrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter );
+
+  release_object( handle.matrix );
+  set_object( handle.matrix, completed_matrix );
 }
 
 
@@ -500,14 +512,15 @@ void matrix_apply( MPI::Intercomm intercomm ) {
 
 /* MATRIX_SOLVE: solve linear system
    
-     -> broadcast HANDLE handle.{matrix,rhs,lhs}
+     -> broadcast HANDLE handle.{matrix,precon,rhs,lhs}
 */
 void matrix_solve( MPI::Intercomm intercomm ) {
 
-  struct { handle_t matrix, rhs, lhs; } handle;
+  struct { handle_t matrix, precon, rhs, lhs; } handle;
   Bcast( intercomm, &handle );
 
   Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
+  Teuchos::RCP<operator_t> precon = get_object<operator_t>( handle.precon );
   Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
   Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
 
@@ -521,7 +534,7 @@ void matrix_solve( MPI::Intercomm intercomm ) {
   Teuchos::RCP<solvermanager_t> solver = factory.create( "GMRES", solverParams );
   Teuchos::RCP<linearproblem_t> problem = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
 
-  //problem->setRightPrec (M);
+  problem->setRightPrec( precon );
 
   // from the docs: Many of Belos' solvers require that this method has been
   // called on the linear problem, before they can solve it.
@@ -542,14 +555,77 @@ void matrix_solve( MPI::Intercomm intercomm ) {
 }
 
 
+/* PRECON_NEW: create new preconditioner
+   
+     -> broadcast HANDLE handle.{precon,matrix}
+*/
+void precon_new( MPI::Intercomm intercomm ) {
+
+  struct { handle_t precon, matrix; } handle;
+  Bcast( intercomm, &handle );
+
+  Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
+ 
+  Ifpack2::Factory factory;
+  Teuchos::RCP<precon_t> precon = factory.create( "RELAXATION", matrix );
+
+  Teuchos::RCP<params_t> preconParams = Teuchos::rcp( new params_t );
+
+//preconParams->set( "fact: ilut level-of-fill", 2.0 );
+//preconParams->set( "fact: drop tolerance", 0.0 );
+//preconParams->set( "fact: absolute threshold", 0.1 );
+
+  preconParams->set( "relaxation: type", "Jacobi" );
+  preconParams->set( "relaxation: sweeps", 1 );
+  preconParams->set( "relaxation: damping factor", 1. );
+  preconParams->set( "relaxation: zero starting solution", true );
+  preconParams->set( "relaxation: backward mode", false );
+  preconParams->set( "relaxation: use l1", false );
+  preconParams->set( "relaxation: l1 eta", 1.5 );
+  preconParams->set( "relaxation: min diagonal value", 0. );
+  preconParams->set( "relaxation: fix tiny diagonal entries", false );
+  preconParams->set( "relaxation: check diagonal entries", false );
+
+  precon->setParameters( *preconParams );
+
+  precon->initialize();
+  precon->compute();
+
+  magnitude_t condest = precon->computeCondEst( Ifpack2::Cheap );
+  out(intercomm) << "Ifpack2 preconditioner's estimated condition number: " << condest << std::endl;
+
+  set_object( handle.precon, precon );
+}
+
+
+/* EXPORT_NEW: create new exporter
+   
+     -> broadcast HANDLE handle.{exporter,srcmap,dstmap}
+*/
+void export_new( MPI::Intercomm intercomm ) {
+
+  struct { handle_t exporter, srcmap, dstmap; } handle;
+  Bcast( intercomm, &handle );
+
+  Teuchos::RCP<const map_t> srcmap = get_object<const map_t>( handle.srcmap );
+  Teuchos::RCP<const map_t> dstmap = get_object<const map_t>( handle.dstmap );
+
+  Teuchos::RCP<export_t> exporter = Teuchos::rcp( new export_t( srcmap, dstmap ) );
+
+  set_object( handle.exporter, exporter );
+}
+
+
 /* MPI SETUP */
 
 
 typedef void ( *funcptr )( MPI::Intercomm );
-#define TOKENS release, map_new, graph_new, \
+#define TOKENS release, \
   vector_new, vector_add_block, vector_getdata, vector_norm, vector_dot, \
   matrix_new, matrix_add_block, matrix_fillcomplete, matrix_norm, matrix_apply, matrix_solve, \
-  params_new, params_set<number_t>, params_set<scalar_t>, params_print
+  params_new, params_set<number_t>, params_set<scalar_t>, params_print, \
+  map_new, graph_new, precon_new, export_new
+
 funcptr FTABLE[] = { TOKENS };
 #define NTOKENS ( sizeof(FTABLE) / sizeof(funcptr) )
 #define STR(...) XSTR((__VA_ARGS__))

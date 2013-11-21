@@ -40,8 +40,9 @@ def test( nprocs, size ):
 
   params.cprint()
 
-  rowmap = libmatrix.Map( comm, globs=rowdofmap )
-  domainmap = libmatrix.Map( comm, globs=domaindofmap )
+  rowmap = libmatrix.Map( comm, globs=rowdofmap ) # overlapping
+  domainmap = libmatrix.Map( comm, globs=domaindofmap ) # 1-to-1
+  export = libmatrix.Export( comm, rowmap, domainmap )
 
   v_npy = numpy.arange(1,size+1) * 10
   v_npy[0] /= 2
@@ -79,7 +80,7 @@ def test( nprocs, size ):
 
   #A.add( rank=0, rowidx=[0,size-1], colidx=[0,size-1], data=block )
 
-  A.complete()
+  A.complete( export )
 
   A_npy = numpy.eye(size,size) * 2 - numpy.eye(size,size,1) - numpy.eye(size,size,-1)
   A_npy[0,0] = A_npy[-1,-1] = 1
@@ -115,7 +116,8 @@ def test( nprocs, size ):
   solverParams.set( "Convergence Tolerance", 1.0e-8 );
   solverParams.cprint()
 
-  vv = A.solve( w )
+  P = libmatrix.Precon( comm, A )
+  vv = A.solve( P, w )
 
   print 'solve result:', vv.toarray()
   print 'difference:', v.toarray() - vv.toarray()

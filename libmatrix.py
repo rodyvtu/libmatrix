@@ -102,6 +102,12 @@ class LibMatrix( InterComm ):
     self.bcast( handle, handle_t )
 
   @bcast_token
+  def export_new( self, srcmap_handle, dstmap_handle ):
+    export_handle = self.claim_handle()
+    self.bcast( [ export_handle, srcmap_handle, dstmap_handle ], handle_t )
+    return export_handle
+
+  @bcast_token
   def vector_new( self, map_handle ):
     vec_handle = self.claim_handle()
     self.bcast( [ vec_handle, map_handle ], handle_t )
@@ -144,6 +150,12 @@ class LibMatrix( InterComm ):
     return matrix_handle
 
   @bcast_token
+  def precon_new( self, matrix_handle ):
+    precon_handle = self.claim_handle()
+    self.bcast( [ precon_handle, matrix_handle ], handle_t )
+    return precon_handle
+
+  @bcast_token
   def matrix_add_block( self, handle, rank, rowidx, colidx, data ):
     data = numpy.asarray(data)
     shape = len(rowidx), len(colidx)
@@ -157,8 +169,8 @@ class LibMatrix( InterComm ):
     self.send( rank, data.ravel(), scalar_t )
 
   @bcast_token
-  def matrix_fillcomplete( self, handle ):
-    self.bcast( handle, handle_t )
+  def matrix_fillcomplete( self, matrix_handle, export_handle ):
+    self.bcast( [ matrix_handle, export_handle ], handle_t )
 
   @bcast_token
   def matrix_norm( self, handle ):
@@ -180,8 +192,8 @@ class LibMatrix( InterComm ):
     return graph_handle
 
   @bcast_token
-  def matrix_solve( self, matrix_handle, rhs_handle, lhs_handle ):
-    self.bcast( [ matrix_handle, rhs_handle, lhs_handle ], handle_t )
+  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle ):
+    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle ], handle_t )
 
   def __del__( self ):
     self.bcast( -1, token_t )
@@ -246,19 +258,32 @@ class Vector( Object ):
     return self.comm.vector_dot( self.handle, other.handle )
 
 
-class Matrix( Object ):
+class Operator( Object ):
+
+  def __init__( self, comm, handle, shape ):
+    self.shape = tuple(shape)
+    Object.__init__( self, comm, handle )
+
+
+class Precon( Operator ):
+
+  def __init__( self, comm, matrix ):
+    Operator.__init__( self, comm, comm.precon_new(matrix.handle), reversed(matrix.shape) )
+
+
+class Matrix( Operator ):
 
   def __init__( self, comm, shape, graph ):
-    self.shape = shape
     assert isinstance( graph, Graph )
     self.graph = graph
-    Object.__init__( self, comm, comm.matrix_new( graph.handle ) )
+    Operator.__init__( self, comm, comm.matrix_new(graph.handle), shape )
 
   def add( self, rank, rowidx, colidx, data ):
     self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
 
-  def complete( self ):
-    self.comm.matrix_fillcomplete( self.handle )
+  def complete( self, exporter ):
+    assert isinstance( exporter, Export )
+    self.comm.matrix_fillcomplete( self.handle, exporter.handle )
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
@@ -271,12 +296,23 @@ class Matrix( Object ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, rhs ):
+  def solve( self, precon, rhs ):
+    assert isinstance( precon, Operator )
     assert isinstance( rhs, Vector )
     assert self.shape[0] == rhs.size
     lhs = Vector( self.comm, self.shape[1], self.graph.domainmap )
-    self.comm.matrix_solve( self.handle, rhs.handle, lhs.handle )
+    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle )
     return lhs
+
+
+class Export( Object ):
+
+  def __init__( self, comm, srcmap, dstmap ):
+    assert isinstance( srcmap, Map )
+    assert isinstance( dstmap, Map )
+    self.srcmap = srcmap
+    self.dstmap = dstmap
+    Object.__init__( self, comm, comm.export_new( srcmap.handle, dstmap.handle ) )
 
 
 class Graph( Object ):
