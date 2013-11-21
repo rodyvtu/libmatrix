@@ -35,8 +35,8 @@ def test( nprocs, size ):
 
   print 'creating parameter list object'
   params = libmatrix.ParameterList( comm )
-  params.set( 'H2G2', 42 )
-  params.set( 'pi', numpy.pi )
+  params['H2G2'] = 42
+  params['pi'] = numpy.pi
 
   params.cprint()
 
@@ -112,9 +112,9 @@ def test( nprocs, size ):
   print 'reconstructed vector:', numpy.array( numbers )
 
   solverParams = libmatrix.ParameterList( comm )
-  solverParams.set( "Num Blocks", 40 );
-  solverParams.set( "Maximum Iterations", 400 );
-  solverParams.set( "Convergence Tolerance", 1.0e-8 );
+  solverParams['Num Blocks'] = 40
+  solverParams['Maximum Iterations'] = 400
+  solverParams['Convergence Tolerance'] = 1e-8
   solverParams.cprint()
 
   P = libmatrix.Precon( comm, A )

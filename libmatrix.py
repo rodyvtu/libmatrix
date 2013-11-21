@@ -216,15 +216,19 @@ class Object( object ):
 class ParameterList( Object ):
 
   def __init__( self, comm ):
+    self.items = {}
     Object.__init__( self, comm, comm.params_new() )
 
   def cprint ( self ):
     self.comm.params_print( self.handle )
 
-  def set ( self, key, value ):
-    assert isinstance(key,str), 'Expected first argument to be a string'
-    assert isinstance(value,float) or isinstance(value,int), 'Current implementation supports int and float only'
+  def __setitem__( self, key, value ):
+    assert isinstance( key, str ), 'Expected first argument to be a string'
     self.comm.params_set( self.handle, key, value )
+    self.items[ key ] = value
+
+  def __str__( self ):
+    return 'ParameterList( %s )' % ', '.join( '%s=%s' % item for item in self.items.items() )
 
 
 class Map( Object ):
