@@ -20,6 +20,16 @@
 
 Teuchos::oblackholestream blackHole;
 
+auto supportedPreconNames = Teuchos::tuple(
+  std::string( "ILUT" ),
+  std::string( "RILUK" ),
+  std::string( "RELAXATION" ),
+  std::string( "CHEBYSHEV" ),
+  std::string( "DIAGONAL" ),
+  std::string( "SCHWARZ" ),
+  std::string( "KRYLOV" )
+);
+
 class DescribableParams : public Teuchos::Describable, public Teuchos::ParameterList {};
 
 typedef double scalar_t;
@@ -41,6 +51,7 @@ typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_
 typedef Belos::SolverFactory<scalar_t, multivector_t, operator_t> solverfactory_t;
 typedef DescribableParams params_t;
 typedef Ifpack2::Preconditioner<scalar_t, local_t, global_t, node_t> precon_t;
+typedef Ifpack2::Factory preconfactory_t;
 typedef Teuchos::ScalarTraits<scalar_t>::magnitudeType magnitude_t;
 typedef Tpetra::Export<local_t, global_t, node_t> export_t;
 
@@ -512,12 +523,12 @@ void matrix_apply( MPI::Intercomm intercomm ) {
 
 /* MATRIX_SOLVE: solve linear system
    
-     -> broadcast HANDLE handle.{matrix,precon,rhs,lhs,solver,solverparams}
+     -> broadcast HANDLE handle.{matrix,precon,rhs,lhs,solvertype,solverparams}
      -> broadcast BOOL symmetric
 */
 void matrix_solve( MPI::Intercomm intercomm ) {
 
-  struct { handle_t matrix, precon, rhs, lhs, solver, solverparams; } handle;
+  struct { handle_t matrix, precon, rhs, lhs, solvertype, solverparams; } handle;
   Bcast( intercomm, &handle );
 
   bool_t symmetric;
@@ -530,7 +541,7 @@ void matrix_solve( MPI::Intercomm intercomm ) {
   Teuchos::RCP<params_t> solverparams = get_object<params_t>( handle.solverparams );
 
   solverfactory_t factory;
-  Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solver], solverparams );
+  Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solvertype], solverparams );
   Teuchos::RCP<linearproblem_t> problem = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
 
   if ( symmetric ) {
@@ -559,37 +570,20 @@ void matrix_solve( MPI::Intercomm intercomm ) {
 
 /* PRECON_NEW: create new preconditioner
    
-     -> broadcast HANDLE handle.{precon,matrix}
+     -> broadcast HANDLE handle.{precon,matrix,precontype,preconparams}
 */
 void precon_new( MPI::Intercomm intercomm ) {
 
-  struct { handle_t precon, matrix; } handle;
+  struct { handle_t precon, matrix, precontype, preconparams; } handle;
   Bcast( intercomm, &handle );
 
   Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
+  Teuchos::RCP<const params_t> preconparams = get_object<const params_t>( handle.preconparams );
  
-  Ifpack2::Factory factory;
-  Teuchos::RCP<precon_t> precon = factory.create( "RELAXATION", matrix );
+  preconfactory_t factory;
+  Teuchos::RCP<precon_t> precon = factory.create( supportedPreconNames[handle.precontype], matrix );
 
-  Teuchos::RCP<params_t> preconParams = Teuchos::rcp( new params_t );
-
-//preconParams->set( "fact: ilut level-of-fill", 2.0 );
-//preconParams->set( "fact: drop tolerance", 0.0 );
-//preconParams->set( "fact: absolute threshold", 0.1 );
-
-  preconParams->set( "relaxation: type", "Jacobi" );
-  preconParams->set( "relaxation: sweeps", 1 );
-  preconParams->set( "relaxation: damping factor", 1. );
-  preconParams->set( "relaxation: zero starting solution", true );
-  preconParams->set( "relaxation: backward mode", false );
-  preconParams->set( "relaxation: use l1", false );
-  preconParams->set( "relaxation: l1 eta", 1.5 );
-  preconParams->set( "relaxation: min diagonal value", 0. );
-  preconParams->set( "relaxation: fix tiny diagonal entries", false );
-  preconParams->set( "relaxation: check diagonal entries", false );
-
-  precon->setParameters( *preconParams );
-
+  precon->setParameters( *preconparams );
   precon->initialize();
   precon->compute();
 
@@ -668,12 +662,19 @@ int main( int argc, char *argv[] ) {
     std::cout << "tokens: " << tokens.substr(1,tokens.length()-2) << std::endl;
 
     std::cout << "solvers";
-    solverfactory_t factory;
-    char sep[] = ": ";
-    for ( auto name : factory.supportedSolverNames() ) {
+    {char sep[] = ": ";
+    for ( auto name : solverfactory_t().supportedSolverNames() ) {
       std::cout << sep << name;
       sep[0] = ',';
-    }
+    }}
+    std::cout << std::endl;
+
+    std::cout << "precons";
+    {char sep[] = ": ";
+    for ( auto name : supportedPreconNames ) {
+      std::cout << sep << name;
+      sep[0] = ',';
+    }}
     std::cout << std::endl;
 
     std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;

@@ -5,6 +5,7 @@ from mpi import InterComm
 _info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
 _tokens = _info.pop('tokens').split(', ')
 _solvers = _info.pop('solvers').split(', ')
+_precons = _info.pop('precons').split(', ')
 
 local_t  = numpy.dtype( _info.pop( 'local_t'  ) )
 global_t = numpy.dtype( _info.pop( 'global_t' ) )
@@ -152,9 +153,9 @@ class LibMatrix( InterComm ):
     return matrix_handle
 
   @bcast_token
-  def precon_new( self, matrix_handle ):
+  def precon_new( self, matrix_handle, precontype_handle, preconparams_handle ):
     precon_handle = self.claim_handle()
-    self.bcast( [ precon_handle, matrix_handle ], handle_t )
+    self.bcast( [ precon_handle, matrix_handle, precontype_handle, preconparams_handle ], handle_t )
     return precon_handle
 
   @bcast_token
@@ -194,8 +195,8 @@ class LibMatrix( InterComm ):
     return graph_handle
 
   @bcast_token
-  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle, solver_handle, solverparams_handle, symmetric ):
-    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle, solver_handle, solverparams_handle ], handle_t )
+  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle, solvertype_handle, symmetric, solverparams_handle ):
+    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle, solvertype_handle, solverparams_handle ], handle_t )
     self.bcast( symmetric, bool_t )
 
   def __del__( self ):
@@ -274,8 +275,13 @@ class Operator( Object ):
 
 class Precon( Operator ):
 
-  def __init__( self, comm, matrix ):
-    Operator.__init__( self, comm, comm.precon_new(matrix.handle), reversed(matrix.shape) )
+  def __init__( self, comm, matrix, precontype, preconparams=None ):
+    assert isinstance( matrix, Operator )
+    if not preconparams:
+      preconparams = ParameterList( comm )
+    assert isinstance( preconparams, ParameterList )
+    myhandle = comm.precon_new( matrix.handle, _precons.index(precontype), preconparams.handle )
+    Operator.__init__( self, comm, myhandle, reversed(matrix.shape) )
 
 
 class Matrix( Operator ):
@@ -305,12 +311,15 @@ class Matrix( Operator ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, precon, rhs, solverparams, solvername='GMRES', symmetric=False ):
+  def solve( self, precon, rhs, name='GMRES', symmetric=False, params=None ):
     assert isinstance( precon, Operator )
     assert isinstance( rhs, Vector )
+    if not params:
+      params = ParameterList( self.comm )
+    assert isinstance( params, ParameterList )
     assert self.shape[0] == rhs.size
     lhs = Vector( self.comm, self.shape[1], self.domainmap )
-    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( solvername ), solverparams.handle, symmetric )
+    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( name ), symmetric, params.handle )
     return lhs
 
 

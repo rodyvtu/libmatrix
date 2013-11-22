@@ -111,14 +111,9 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
-  solverParams = libmatrix.ParameterList( comm )
-  #solverParams['Num Blocks'] = 40
-  #solverParams['Maximum Iterations'] = 400
-  #solverParams['Convergence Tolerance'] = 1e-8
-  #solverParams.cprint()
 
-  P = libmatrix.Precon( comm, A )
-  vv = A.solve( P, w, solverParams, solvername='GMRES' )
+  P = libmatrix.Precon( comm, A, 'ILUT' )
+  vv = A.solve( P, w, 'GMRES' )
 
   print 'solve result:', vv.toarray()
   print 'difference:', v.toarray() - vv.toarray()
