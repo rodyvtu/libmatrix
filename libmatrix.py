@@ -3,7 +3,8 @@ from mpi import InterComm
 
 
 _info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
-_names = _info.pop('tokens')[1:-1].split(', ')
+_tokens = _info.pop('tokens').split(', ')
+_solvers = _info.pop('solvers').split(', ')
 
 local_t  = numpy.dtype( _info.pop( 'local_t'  ) )
 global_t = numpy.dtype( _info.pop( 'global_t' ) )
@@ -11,13 +12,14 @@ handle_t = numpy.dtype( _info.pop( 'handle_t' ) )
 size_t   = numpy.dtype( _info.pop( 'size_t'   ) )
 scalar_t = numpy.dtype( _info.pop( 'scalar_t' ) )
 number_t = numpy.dtype( _info.pop( 'number_t' ) )
+bool_t   = numpy.dtype( _info.pop( 'bool_t'   ) )
 token_t  = numpy.dtype( _info.pop( 'token_t'  ) )
 char_t   = numpy.dtype( 'str' )
 
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
-    int_token = _names.index( func.func_name + '<number_t>' )
-    float_token = _names.index( func.func_name + '<scalar_t>' )
+    int_token = _tokens.index( func.func_name + '<number_t>' )
+    float_token = _tokens.index( func.func_name + '<scalar_t>' )
     def wrapped( self, *args ):
       assert self.isconnected(), 'connection is closed'
       template_arg = args[template_var_arg]
@@ -37,7 +39,7 @@ def bcast_token_template( template_var_arg ):
   return bcast_token 
 
 def bcast_token( func ):
-  token = _names.index( func.func_name )
+  token = _tokens.index( func.func_name )
   def wrapped( self, *args, **kwargs ):
     assert self.isconnected(), 'connection is closed'
     self.bcast( token, token_t )
@@ -192,8 +194,9 @@ class LibMatrix( InterComm ):
     return graph_handle
 
   @bcast_token
-  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle ):
-    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle ], handle_t )
+  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle, solver_handle, solverparams_handle, symmetric ):
+    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle, solver_handle, solverparams_handle ], handle_t )
+    self.bcast( symmetric, bool_t )
 
   def __del__( self ):
     self.bcast( -1, token_t )
@@ -302,12 +305,12 @@ class Matrix( Operator ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, precon, rhs ):
+  def solve( self, precon, rhs, solverparams, solvername='GMRES', symmetric=False ):
     assert isinstance( precon, Operator )
     assert isinstance( rhs, Vector )
     assert self.shape[0] == rhs.size
     lhs = Vector( self.comm, self.shape[1], self.domainmap )
-    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle )
+    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( solvername ), solverparams.handle, symmetric )
     return lhs
 
 

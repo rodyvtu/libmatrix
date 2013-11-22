@@ -28,6 +28,7 @@ typedef int handle_t;
 typedef int local_t;
 typedef long global_t;
 typedef uint8_t token_t;
+typedef bool bool_t;
 typedef Kokkos::DefaultNode::DefaultNodeType node_t;
 typedef Tpetra::Map<local_t, global_t, node_t> map_t;
 typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
@@ -37,6 +38,7 @@ typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t, node_t> matrix_t;
 typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
 typedef Belos::SolverManager<scalar_t, multivector_t, operator_t> solvermanager_t;
 typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_t;
+typedef Belos::SolverFactory<scalar_t, multivector_t, operator_t> solverfactory_t;
 typedef DescribableParams params_t;
 typedef Ifpack2::Preconditioner<scalar_t, local_t, global_t, node_t> precon_t;
 typedef Teuchos::ScalarTraits<scalar_t>::magnitudeType magnitude_t;
@@ -510,28 +512,30 @@ void matrix_apply( MPI::Intercomm intercomm ) {
 
 /* MATRIX_SOLVE: solve linear system
    
-     -> broadcast HANDLE handle.{matrix,precon,rhs,lhs}
+     -> broadcast HANDLE handle.{matrix,precon,rhs,lhs,solver,solverparams}
+     -> broadcast BOOL symmetric
 */
 void matrix_solve( MPI::Intercomm intercomm ) {
 
-  struct { handle_t matrix, precon, rhs, lhs; } handle;
+  struct { handle_t matrix, precon, rhs, lhs, solver, solverparams; } handle;
   Bcast( intercomm, &handle );
+
+  bool_t symmetric;
+  Bcast( intercomm, &symmetric );
 
   Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
   Teuchos::RCP<operator_t> precon = get_object<operator_t>( handle.precon );
   Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
   Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
+  Teuchos::RCP<params_t> solverparams = get_object<params_t>( handle.solverparams );
 
-  Belos::SolverFactory<scalar_t, multivector_t, operator_t> factory;
-
-  Teuchos::RCP<params_t> solverParams = Teuchos::rcp( new params_t );
-  solverParams->set( "Num Blocks", 40 );
-  solverParams->set( "Maximum Iterations", 400 );
-  solverParams->set( "Convergence Tolerance", 1.0e-8 );
-
-  Teuchos::RCP<solvermanager_t> solver = factory.create( "GMRES", solverParams );
+  solverfactory_t factory;
+  Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solver], solverparams );
   Teuchos::RCP<linearproblem_t> problem = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
 
+  if ( symmetric ) {
+    problem->setHermitian();
+  }
   problem->setRightPrec( precon );
 
   // from the docs: Many of Belos' solvers require that this method has been
@@ -659,13 +663,26 @@ void eventloop( char *progname ) {
 int main( int argc, char *argv[] ) {
 
   if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
-    std::cout << "tokens: " << STR(TOKENS) << std::endl;
+
+    std::string tokens( STR(TOKENS) ); // wrapped in parentheses
+    std::cout << "tokens: " << tokens.substr(1,tokens.length()-2) << std::endl;
+
+    std::cout << "solvers";
+    solverfactory_t factory;
+    char sep[] = ": ";
+    for ( auto name : factory.supportedSolverNames() ) {
+      std::cout << sep << name;
+      sep[0] = ',';
+    }
+    std::cout << std::endl;
+
     std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;
     std::cout << "local_t: int" << (sizeof(local_t) << 3) << std::endl;
     std::cout << "global_t: int" << (sizeof(global_t) << 3) << std::endl;
     std::cout << "size_t: uint" << (sizeof(size_t) << 3) << std::endl;
     std::cout << "handle_t: int" << (sizeof(handle_t) << 3) << std::endl;
     std::cout << "number_t: int" << (sizeof(number_t) << 3) << std::endl;
+    std::cout << "bool_t: uint" << (sizeof(bool_t) << 3) << std::endl;
     std::cout << "scalar_t: float" << (sizeof(scalar_t) << 3) << std::endl;
   }
   else if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
