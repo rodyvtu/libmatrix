@@ -154,11 +154,10 @@ public:
 
   typedef void (LibMatrix::*funcptr)();
 
-  /* PARAMS_NEW: create new parameter list
+  void params_new() /* create new parameter list
      
       -> broadcast 1 HANDLE params_handle
-  */
-  void params_new() {
+  */{
   
     struct { handle_t params; } handle;
     bcast( &handle );
@@ -171,15 +170,14 @@ public:
   
   }
   
-  /* PARAMS_SET: set new integer in parameter list
+  template <class T>
+  void params_set() /* set new integer in parameter list
      
       -> broadcast HANDLE params_handle 
       -> broadcast SIZE length_of_key
       -> broadcast CHAR key[length_of_key]
       -> broadcast TEMLATE_ARG value
-  */
-  template <class T>
-  void params_set() {
+  */{
   
     struct { handle_t params; } handle;
     bcast( &handle );
@@ -199,11 +197,10 @@ public:
     out() << "added key=\"" << key << "\" with value=" << value << std::endl;
   }
   
-  /* PARAMS_PRINT: print the params list (c-sided)
+  void params_print() /* print the params list (c-sided)
      
       -> broadcast 1 HANDLE params_handle 
-  */
-  void params_print() {
+  */{
   
     struct { handle_t params; } handle;
     bcast( &handle );
@@ -212,25 +209,23 @@ public:
     params->print( out() );
   }
   
-  /* RELEASE: release object
+  void release() /* release object
      
        -> broadcast HANDLE handle
-  */
-  void release() {
+  */{
   
     handle_t handle;
     bcast( &handle );
     release_object( handle );
   }
   
-  /* MAP_NEW: create new map
+  void map_new() /* create new map
      
        -> broadcast HANDLE handle.map
        -> broadcast SIZE map_size
        -> scatter SIZE number_of_items[map_size]
        -> scatterv GLOBAL items[number_of_items]
-  */
-  void map_new() {
+  */{
   
     struct { handle_t map; } handle;
     bcast( &handle );
@@ -251,11 +246,10 @@ public:
     set_object( handle.map, map );
   }
   
-  /* VECTOR_NEW: create new vector
+  void vector_new() /* create new vector
      
        -> broadcast HANDLE handle.{vector,map}
-  */
-  void vector_new() {
+  */{
   
     struct { handle_t vector, map; } handle;
     bcast( &handle );
@@ -269,7 +263,7 @@ public:
     set_object( handle.vector, vector );
   }
   
-  /* VECTOR_ADD_BLOCK: add items to vector
+  void vector_add_block() /* add items to vector
      
        -> broadcast SIZE rank
      if rank == myrank
@@ -278,8 +272,7 @@ public:
        -> recv GLOBAL indices[number_of_items]
        -> recv SCALAR values[number_of_items]
      endif
-  */
-  void vector_add_block() {
+  */{
   
     size_t rank;
     bcast( &rank );
@@ -311,12 +304,11 @@ public:
   
   }
   
-  /* VECTOR_GETDATA: collect vector over the intercom
+  void vector_getdata() /* collect vector over the intercom
     
        -> broadcast HANDLE handle.vector
       <-  gatherv SCALAR values[vector.size]
-  */
-  void vector_getdata() {
+  */{
   
     struct { handle_t vector; } handle;
     bcast( &handle );
@@ -328,12 +320,11 @@ public:
     gatherv( data.get(), data.size() );
   }
   
-  /* VECTOR_DOT: compute frobenius norm
+  void vector_dot() /* compute frobenius norm
      
        -> broadcast HANDLE handle.{vector1,vector2}
       <-  gather SCALAR norm
-  */
-  void vector_dot() {
+  */{
   
     struct { handle_t vector1, vector2; } handle;
     bcast( &handle );
@@ -345,12 +336,11 @@ public:
     gather( &dot );
   }
   
-  /* VECTOR_NORM: compute frobenius norm
+  void vector_norm() /* compute frobenius norm
      
        -> broadcast HANDLE handle.vector
       <-  gather SCALAR norm
-  */
-  void vector_norm() {
+  */{
   
     struct { handle_t vector; } handle;
     bcast( &handle );
@@ -361,13 +351,12 @@ public:
     gather( &norm );
   }
   
-  /* GRAPH_NEW: create new graph
+  void graph_new() /* create new graph
      
        -> broadcast HANDLE handle.{graph,rowmap,colmap,domainmap,rangemap}
        -> scatterv SIZE offsets[nrows+1]
        -> scatterv LOCAL columns[offsets[-1]]
-  */
-  void graph_new() {
+  */{
   
     struct { handle_t graph, rowmap, colmap; } handle;
     bcast( &handle );
@@ -392,11 +381,10 @@ public:
     set_object( handle.graph, graph );
   }
   
-  /* MATRIX_NEW: create new matrix
+  void matrix_new() /* create new matrix
      
        -> broadcast HANDLE handle.{matrix,graph}
-  */
-  void matrix_new() {
+  */{
   
     struct { handle_t matrix, graph; } handle;
     bcast( &handle );
@@ -410,7 +398,7 @@ public:
     set_object( handle.matrix, matrix );
   }
   
-  /* MATRIX_ADD_BLOCK: add items to matrix
+  void matrix_add_block() /* add items to matrix
      
        -> broadcast SIZE rank
      if rank == myrank
@@ -420,8 +408,7 @@ public:
        -> recv GLOBAL indices[number_of_cols]
        -> recv SCALAR values[number_of_(rows*cols)]
      endif
-  */
-  void matrix_add_block() {
+  */{
   
     size_t rank;
     bcast( &rank );
@@ -455,11 +442,10 @@ public:
   
   }
   
-  /* MATRIX_COMPLETE: set matrix to fill-complete
+  void matrix_complete() /* set matrix to fill-complete
      
        -> broadcast HANDLE handle.{matrix,exporter}
-  */
-  void matrix_complete() {
+  */{
   
     struct { handle_t matrix, exporter; } handle;
     bcast( &handle );
@@ -477,12 +463,11 @@ public:
     set_object( handle.matrix, completed_matrix );
   }
   
-  /* MATRIX_NORM: compute frobenius norm
+  void matrix_norm() /* compute frobenius norm
      
        -> broadcast HANDLE handle.matrix
       <-  gather SCALAR norm
-  */
-  void matrix_norm() {
+  */{
   
     struct { handle_t matrix; } handle;
     bcast( &handle );
@@ -493,11 +478,10 @@ public:
     gather( &norm );
   }
   
-  /* MATRIX_APPLY: matrix vector multiplication
+  void matrix_apply() /* matrix vector multiplication
      
        -> broadcast HANDLE handle.{matrix,out,vector}
-  */
-  void matrix_apply() {
+  */{
   
     struct { handle_t matrix, rhs, lhs; } handle;
     bcast( &handle );
@@ -509,12 +493,11 @@ public:
     matrix->apply( *rhs, *lhs );
   }
   
-  /* MATRIX_SOLVE: solve linear system
+  void matrix_solve() /* solve linear system
      
        -> broadcast HANDLE handle.{matrix,precon,rhs,lhs,solvertype,solverparams}
        -> broadcast BOOL symmetric
-  */
-  void matrix_solve() {
+  */{
   
     struct { handle_t matrix, precon, rhs, lhs, solvertype, solverparams; } handle;
     bcast( &handle );
@@ -555,11 +538,10 @@ public:
     out() << "solver finished in " << numIters << " iterations with result " << result << std::endl;
   }
   
-  /* PRECON_NEW: create new preconditioner
+  void precon_new() /* create new preconditioner
      
        -> broadcast HANDLE handle.{precon,matrix,precontype,preconparams}
-  */
-  void precon_new() {
+  */{
   
     struct { handle_t precon, matrix, precontype, preconparams; } handle;
     bcast( &handle );
@@ -580,11 +562,10 @@ public:
     set_object( handle.precon, precon );
   }
   
-  /* EXPORT_NEW: create new exporter
+  void export_new() /* create new exporter
      
        -> broadcast HANDLE handle.{exporter,srcmap,dstmap}
-  */
-  void export_new() {
+  */{
   
     struct { handle_t exporter, srcmap, dstmap; } handle;
     bcast( &handle );
@@ -597,9 +578,8 @@ public:
     set_object( handle.exporter, exporter );
   }
 
-  /* TOGGLE_STDOUT: switch std output on/off
-  */
-  void toggle_stdout() {
+  void toggle_stdout() /* switch std output on/off
+  */{
   
     if ( verbose ) {
       out() << "output is OFF" << std::endl;
