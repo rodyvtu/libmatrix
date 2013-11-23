@@ -107,32 +107,32 @@ public:
   }
 
   template <class T>
-  inline void Bcast( T *data, const int n=1 ) {
+  inline void bcast( T *data, const int n=1 ) {
     comm.Bcast( (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
-  inline void Scatter( T *data, const int n=1 ) {
+  inline void scatter( T *data, const int n=1 ) {
     comm.Scatter( NULL, 0, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
-  inline void Scatterv( T *data, const int n=1 ) {
+  inline void scatterv( T *data, const int n=1 ) {
     comm.Scatterv( NULL, NULL, NULL, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
-  inline void Recv( T *data, const int n=1, const int tag=0 ) {
+  inline void recv( T *data, const int n=1, const int tag=0 ) {
     comm.Recv( (void *)data, n * sizeof(T), MPI::BYTE, tag, 0 );
   }
   
   template <class T>
-  inline void Gatherv( T *data, const int n=1 ) {
+  inline void gatherv( T *data, const int n=1 ) {
     comm.Gatherv( (void *)data, n * sizeof(T), MPI::BYTE, NULL, NULL, NULL, MPI::BYTE, 0 );
   }
   
   template <class T>
-  inline void Gather( T *data, const int n=1 ) {
+  inline void gather( T *data, const int n=1 ) {
     comm.Gather( (void *)data, n * sizeof(T), MPI::BYTE, NULL, 0, MPI::BYTE, 0 );
   }
 
@@ -161,7 +161,7 @@ public:
   void params_new() {
   
     struct { handle_t params; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<params_t> params = Teuchos::rcp( new params_t );
   
@@ -182,16 +182,16 @@ public:
   void params_set() {
   
     struct { handle_t params; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     size_t nchar;
-    Bcast( &nchar );
+    bcast( &nchar );
   
     std::string key( nchar, 0 );
-    Bcast( const_cast<char*>(key.data()), nchar );
+    bcast( const_cast<char*>(key.data()), nchar );
   
     T value;
-    Bcast( &value );
+    bcast( &value );
   
     Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
     params->set( key, value );
@@ -206,7 +206,7 @@ public:
   void params_print() {
   
     struct { handle_t params; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
     params->print( out() );
@@ -219,7 +219,7 @@ public:
   void release() {
   
     handle_t handle;
-    Bcast( &handle );
+    bcast( &handle );
     release_object( handle );
   }
   
@@ -233,16 +233,16 @@ public:
   void map_new() {
   
     struct { handle_t map; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     size_t size, ndofs;
-    Bcast( &size );
-    Scatter( &ndofs );
+    bcast( &size );
+    scatter( &ndofs );
   
     out() << "creating map #" << handle.map << " with " << ndofs << '/' << size << " items" << std::endl;
   
     Teuchos::Array<global_t> elementList( ndofs );
-    Scatterv( elementList.getRawPtr(), ndofs );
+    scatterv( elementList.getRawPtr(), ndofs );
   
     Teuchos::RCP<node_t> node = Kokkos::DefaultNode::getDefaultNode ();
     Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
@@ -258,7 +258,7 @@ public:
   void vector_new() {
   
     struct { handle_t vector, map; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const map_t> map = get_object<const map_t>( handle.map );
   
@@ -282,25 +282,25 @@ public:
   void vector_add_block() {
   
     size_t rank;
-    Bcast( &rank );
+    bcast( &rank );
   
     if ( rank != myrank ) {
       return;
     }
   
     struct { handle_t vector; } handle;
-    Recv( &handle );
+    recv( &handle );
   
     size_t nitems;
-    Recv( &nitems );
+    recv( &nitems );
   
     out() << "ivec = " << handle.vector << ", nitems = " << nitems << std::endl;
   
     Teuchos::ArrayRCP<local_t> idx( nitems );
     Teuchos::ArrayRCP<scalar_t> data( nitems );
   
-    Recv( idx.getRawPtr(), nitems );
-    Recv( data.getRawPtr(), nitems );
+    recv( idx.getRawPtr(), nitems );
+    recv( data.getRawPtr(), nitems );
   
     Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
   
@@ -319,13 +319,13 @@ public:
   void vector_getdata() {
   
     struct { handle_t vector; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
   
     Teuchos::ArrayRCP<const scalar_t> data = vec->getData();
   
-    Gatherv( data.get(), data.size() );
+    gatherv( data.get(), data.size() );
   }
   
   /* VECTOR_DOT: compute frobenius norm
@@ -336,13 +336,13 @@ public:
   void vector_dot() {
   
     struct { handle_t vector1, vector2; } handle;
-    Bcast( &handle );
+    bcast( &handle );
     Teuchos::RCP<vector_t> vector1 = get_object<vector_t>( handle.vector1 );
     Teuchos::RCP<vector_t> vector2 = get_object<vector_t>( handle.vector2 );
   
     scalar_t dot = vector1->dot( *vector2 );
   
-    Gather( &dot );
+    gather( &dot );
   }
   
   /* VECTOR_NORM: compute frobenius norm
@@ -353,12 +353,12 @@ public:
   void vector_norm() {
   
     struct { handle_t vector; } handle;
-    Bcast( &handle );
+    bcast( &handle );
     Teuchos::RCP<vector_t> vector = get_object<vector_t>( handle.vector );
   
     scalar_t norm = vector->norm2();
   
-    Gather( &norm );
+    gather( &norm );
   }
   
   /* GRAPH_NEW: create new graph
@@ -370,7 +370,7 @@ public:
   void graph_new() {
   
     struct { handle_t graph, rowmap, colmap; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
     Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
@@ -380,11 +380,11 @@ public:
     out() << "creating graph #" << handle.graph << " from rowmap #" << handle.rowmap << ", colmap #" << handle.colmap << " with " << nrows << " rows" << std::endl;
   
     Teuchos::ArrayRCP<size_t> offsets( nrows+1 );
-    Scatterv( offsets.getRawPtr(), nrows+1 );
+    scatterv( offsets.getRawPtr(), nrows+1 );
   
     int nindices = offsets[nrows];
     Teuchos::ArrayRCP<local_t> indices( nindices );
-    Scatterv( indices.getRawPtr(), nindices );
+    scatterv( indices.getRawPtr(), nindices );
   
     Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( rowmap, colmap, offsets, indices ) );
     graph->fillComplete();
@@ -399,7 +399,7 @@ public:
   void matrix_new() {
   
     struct { handle_t matrix, graph; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const graph_t> graph = get_object<const graph_t>( handle.graph );
   
@@ -424,17 +424,17 @@ public:
   void matrix_add_block() {
   
     size_t rank;
-    Bcast( &rank );
+    bcast( &rank );
   
     if ( rank != myrank ) {
       return;
     }
   
     struct { handle_t matrix; } handle;
-    Recv( &handle );
+    recv( &handle );
   
     size_t nitems[2];
-    Recv( nitems, 2 );
+    recv( nitems, 2 );
   
     out() << "imat = " << handle.matrix << ", nitems = " << nitems[0] << "," << nitems[1] << std::endl;
   
@@ -442,9 +442,9 @@ public:
     Teuchos::ArrayRCP<local_t> colidx( nitems[1] );
     Teuchos::ArrayRCP<scalar_t> data( nitems[0]*nitems[1] );
   
-    Recv( rowidx.getRawPtr(), nitems[0] );
-    Recv( colidx.getRawPtr(), nitems[1] );
-    Recv( data.getRawPtr(), nitems[0]*nitems[1] );
+    recv( rowidx.getRawPtr(), nitems[0] );
+    recv( colidx.getRawPtr(), nitems[1] );
+    recv( data.getRawPtr(), nitems[0]*nitems[1] );
   
     Teuchos::RCP<matrix_t> mat = get_object<matrix_t>( handle.matrix );
   
@@ -462,7 +462,7 @@ public:
   void matrix_complete() {
   
     struct { handle_t matrix, exporter; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
     Teuchos::RCP<const export_t> exporter = get_object<const export_t>( handle.exporter );
@@ -485,12 +485,12 @@ public:
   void matrix_norm() {
   
     struct { handle_t matrix; } handle;
-    Bcast( &handle );
+    bcast( &handle );
     Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
   
     scalar_t norm = matrix->getFrobeniusNorm();
   
-    Gather( &norm );
+    gather( &norm );
   }
   
   /* MATRIX_APPLY: matrix vector multiplication
@@ -500,7 +500,7 @@ public:
   void matrix_apply() {
   
     struct { handle_t matrix, rhs, lhs; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
     Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
@@ -517,10 +517,10 @@ public:
   void matrix_solve() {
   
     struct { handle_t matrix, precon, rhs, lhs, solvertype, solverparams; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     bool_t symmetric;
-    Bcast( &symmetric );
+    bcast( &symmetric );
   
     Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
     Teuchos::RCP<operator_t> precon = get_object<operator_t>( handle.precon );
@@ -562,7 +562,7 @@ public:
   void precon_new() {
   
     struct { handle_t precon, matrix, precontype, preconparams; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
     Teuchos::RCP<const params_t> preconparams = get_object<const params_t>( handle.preconparams );
@@ -587,7 +587,7 @@ public:
   void export_new() {
   
     struct { handle_t exporter, srcmap, dstmap; } handle;
-    Bcast( &handle );
+    bcast( &handle );
   
     Teuchos::RCP<const map_t> srcmap = get_object<const map_t>( handle.srcmap );
     Teuchos::RCP<const map_t> dstmap = get_object<const map_t>( handle.dstmap );
@@ -630,7 +630,7 @@ void eventloop( char *progname ) {
   token_t c;
   for ( ;; ) {
     intercomm.out() << "waiting" << std::endl;
-    intercomm.Bcast( &c );
+    intercomm.bcast( &c );
     intercomm.out() << "received " << (int)c << std::endl;
     if ( c >= NTOKENS ) {
       intercomm.out() << "quit" << std::endl;
