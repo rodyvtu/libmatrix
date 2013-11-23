@@ -199,6 +199,10 @@ class LibMatrix( InterComm ):
     self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle, solvertype_handle, solverparams_handle ], handle_t )
     self.bcast( symmetric, bool_t )
 
+  @bcast_token
+  def toggle_stdout( self ):
+    pass
+
   def __del__( self ):
     self.bcast( -1, token_t )
     InterComm.__del__( self )
