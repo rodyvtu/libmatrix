@@ -1,8 +1,11 @@
-import numpy, os
+import numpy, subprocess
 from mpi import InterComm
 
+exe, pyext = __file__.rsplit( '.', 1 )
+exe += '.mpi'
+info, dummy = subprocess.Popen( [ exe, 'info' ], stdout=subprocess.PIPE ).communicate()
 
-_info  = dict( line.rstrip().split( ': ', 1 ) for line in os.popen( './libmatrix.mpi info' ) )
+_info  = dict( line.split( ': ', 1 ) for line in info.splitlines() )
 _tokens = _info.pop('tokens').split(', ')
 _solvers = _info.pop('solvers').split(', ')
 _precons = _info.pop('precons').split(', ')
@@ -55,7 +58,7 @@ class LibMatrix( InterComm ):
   'interface to all libmatrix functions'
 
   def __init__( self, nprocs ):
-    InterComm.__init__( self, 'libmatrix.mpi', args=['eventloop'], maxprocs=nprocs )
+    InterComm.__init__( self, exe, args=['eventloop'], maxprocs=nprocs )
     assert self.size == nprocs
     self.nhandles = 0
     self.released = []
