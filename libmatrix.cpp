@@ -603,16 +603,16 @@ private:
 
 void eventloop( char *progname ) {
 
-  LibMatrix::funcptr FTABLE[] = { TOKENFUNCS };
-  const size_t NTOKENS = sizeof(FTABLE) / sizeof(LibMatrix::funcptr);
+  LibMatrix::funcptr FTABLE[] = { FUNCS };
+  const size_t NFUNCS = sizeof(FTABLE) / sizeof(LibMatrix::funcptr);
 
   LibMatrix intercomm( progname );
   token_t c;
   for ( ;; ) {
     intercomm.out() << "waiting" << std::endl;
     intercomm.bcast( &c );
-    intercomm.out() << "received " << (int)c << std::endl;
-    if ( c >= NTOKENS ) {
+    intercomm.out() << "received " << c << std::endl;
+    if ( c >= NFUNCS ) {
       intercomm.out() << "quit" << std::endl;
       break;
     }
@@ -624,7 +624,7 @@ int main( int argc, char *argv[] ) {
 
   if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
 
-    std::cout << "tokens: " << TOKENS << std::endl;
+    std::cout << "tokens: " << FUNCNAMES << std::endl;
 
     std::cout << "solvers";
     {char sep[] = ": ";
