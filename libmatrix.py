@@ -6,7 +6,7 @@ exe += '.mpi'
 info, dummy = subprocess.Popen( [ exe, 'info' ], stdout=subprocess.PIPE ).communicate()
 
 _info  = dict( line.split( ': ', 1 ) for line in info.splitlines() )
-_tokens = _info.pop('tokens').split(', ')
+_functions = _info.pop('functions').split(', ')
 _solvers = _info.pop('solvers').split(', ')
 _precons = _info.pop('precons').split(', ')
 
@@ -22,8 +22,8 @@ char_t   = numpy.dtype( 'str' )
 
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
-    int_token = _tokens.index( func.func_name + '<number_t>' )
-    float_token = _tokens.index( func.func_name + '<scalar_t>' )
+    int_token = _functions.index( func.func_name + '<number_t>' )
+    float_token = _functions.index( func.func_name + '<scalar_t>' )
     def wrapped( self, *args ):
       assert self.isconnected(), 'connection is closed'
       template_arg = args[template_var_arg]
@@ -43,7 +43,7 @@ def bcast_token_template( template_var_arg ):
   return bcast_token 
 
 def bcast_token( func ):
-  token = _tokens.index( func.func_name )
+  token = _functions.index( func.func_name )
   def wrapped( self, *args, **kwargs ):
     assert self.isconnected(), 'connection is closed'
     self.bcast( token, token_t )

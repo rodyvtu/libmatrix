@@ -624,7 +624,7 @@ int main( int argc, char *argv[] ) {
 
   if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
 
-    std::cout << "tokens: " << FUNCNAMES << std::endl;
+    std::cout << "functions: " << FUNCNAMES << std::endl;
 
     std::cout << "solvers";
     {char sep[] = ": ";
