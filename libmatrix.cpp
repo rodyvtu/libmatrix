@@ -58,8 +58,6 @@ typedef Tpetra::Export<local_t, global_t, node_t> export_t;
 const global_t indexbase = 0;
 
 
-/* OBJECT ARRAY */
-
 class ObjectArray {
 
 public:
@@ -88,9 +86,6 @@ private:
   Teuchos::Array<Teuchos::RCP<Teuchos::Describable> > objects;
 
 };
-
-
-/* INTERCOMM */
 
 class Intercomm {
 
@@ -150,9 +145,6 @@ private:
   MPI::Intercomm comm;
 
 };
-
-
-/* LIBMATRIX API */
 
 class LibMatrix : public Intercomm, public ObjectArray {
 
@@ -629,9 +621,6 @@ private:
 
 };
 
-
-/* MPI SETUP */
-
 void eventloop( char *progname ) {
 
   LibMatrix::funcptr FTABLE[] = { TOKENFUNCS };
@@ -640,17 +629,16 @@ void eventloop( char *progname ) {
   LibMatrix intercomm( progname );
   token_t c;
   for ( ;; ) {
-    intercomm.out() << "waiting\n";
+    intercomm.out() << "waiting" << std::endl;
     intercomm.Bcast( &c );
-    intercomm.out() << "received " << (int)c << '\n';
+    intercomm.out() << "received " << (int)c << std::endl;
     if ( c >= NTOKENS ) {
-      intercomm.out() << "quit\n";
+      intercomm.out() << "quit" << std::endl;
       break;
     }
     (intercomm.*FTABLE[c])();
   }
 }
-
 
 int main( int argc, char *argv[] ) {
 

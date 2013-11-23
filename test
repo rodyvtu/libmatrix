@@ -111,12 +111,12 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
-  #comm.toggle_stdout()
+  comm.toggle_stdout()
 
   P = libmatrix.Precon( comm, A, 'ILUT' )
   vv = A.solve( P, w, 'CG' )
 
-  #comm.toggle_stdout()
+  comm.toggle_stdout()
 
   print 'solve result:', vv.toarray()
   print 'difference:', v.toarray() - vv.toarray()
