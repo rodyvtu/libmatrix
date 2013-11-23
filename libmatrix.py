@@ -259,6 +259,7 @@ class Vector( Object ):
     Object.__init__( self, comm, comm.vector_new( map.handle ) )
 
   def add( self, rank, idx, data ):
+    idx, = idx
     self.comm.vector_add_block( self.handle, rank, idx, data )
 
   def toarray( self ):
@@ -298,7 +299,8 @@ class Matrix( Operator ):
     self.graph = graph
     Operator.__init__( self, comm, comm.matrix_new(graph.handle), shape )
 
-  def add( self, rank, rowidx, colidx, data ):
+  def add( self, rank, idx, data ):
+    rowidx, colidx = idx
     self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
 
   def complete( self, exporter ):
