@@ -7,7 +7,7 @@ class InterComm( object ):
 
   def __init__( self, cmd, **kwargs ):
     self.__comm = MPI.COMM_SELF.Spawn( cmd, **kwargs )
-    self.size = self.__comm.remote_size
+    self.nprocs = self.__comm.remote_size
 
   def isconnected( self ):
     return bool( self.__comm )
@@ -20,7 +20,7 @@ class InterComm( object ):
     self.__comm.Bcast( [ data, MPI.BYTE ], root=MPI.ROOT )
   
   def gather( self, dtype ):
-    array = numpy.empty( self.size, dtype=dtype )
+    array = numpy.empty( self.nprocs, dtype=dtype )
     self.__comm.Gather( None, [ array, MPI.BYTE ], root=MPI.ROOT )
     return array
   

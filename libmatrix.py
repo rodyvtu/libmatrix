@@ -59,7 +59,7 @@ class LibMatrix( InterComm ):
 
   def __init__( self, nprocs ):
     InterComm.__init__( self, exe, args=['eventloop'], maxprocs=nprocs )
-    assert self.size == nprocs
+    assert self.nprocs == nprocs
     self.nhandles = 0
     self.released = []
 
@@ -245,7 +245,7 @@ class ParameterList( Object ):
 class Map( Object ):
 
   def __init__( self, comm, globs ):
-    assert len(globs) == comm.size
+    assert len(globs) == comm.nprocs
     self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
     Object.__init__( self, comm, comm.map_new( globs ) )
 
