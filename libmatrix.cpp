@@ -350,6 +350,24 @@ public:
   
     gather( &norm );
   }
+
+  void vector_complete() /* export vector
+
+       -> broadcast HANDLE handle.{vector,exporter}
+  */{
+
+    struct { handle_t vector, exporter; } handle;
+    bcast( &handle );
+    Teuchos::RCP<vector_t> vector = get_object<vector_t>( handle.vector );
+    Teuchos::RCP<export_t> exporter = get_object<export_t>( handle.exporter );
+    Teuchos::RCP<const map_t> map = exporter->getTargetMap();
+
+    Teuchos::RCP<vector_t> completed_vector = Teuchos::rcp( new vector_t( map ) );
+    completed_vector->doExport( *vector, *exporter, Tpetra::ADD );
+
+    release_object( handle.vector );
+    set_object( handle.vector, completed_vector );
+  }
   
   void graph_new() /* create new graph
      
@@ -442,7 +460,7 @@ public:
   
   }
   
-  void matrix_complete() /* set matrix to fill-complete
+  void matrix_complete() /* export matrix and fill-complete
      
        -> broadcast HANDLE handle.{matrix,exporter}
   */{
@@ -458,6 +476,7 @@ public:
     out() << "completing matrix #" << handle.matrix << std::endl;
   
     Teuchos::RCP<matrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
+    // defaults to "ADD" combine mode (reverseMode=false in Tpetra_CrsMatrix_def.hpp)
   
     release_object( handle.matrix );
     set_object( handle.matrix, completed_matrix );

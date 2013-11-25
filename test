@@ -45,15 +45,22 @@ def test( nprocs, size ):
   export = libmatrix.Export( comm, rowmap, domainmap )
 
   v_npy = numpy.arange(1,size+1) * 10
+
+  v = libmatrix.Vector( comm, size, rowmap )
+
+  for iproc, dofs in enumerate( rowdofmap ):
+    values = v_npy[dofs]
+    values[0] /= 2
+    values[-1] /= 2
+    print 'adding', values, ' to ', dofs, ' on proc', iproc
+    v.add( rank=iproc, idx=[range(len(dofs))], data=values )
+
+  v.complete( export )
+
   v_npy[0] /= 2
   v_npy[-1] /= 2
 
-  v = libmatrix.Vector( comm, size, domainmap )
-
-  for iproc, dofs in enumerate( domaindofmap ):
-    values = v_npy[dofs]
-    print 'adding', values, ' to ', dofs, ' on proc', iproc
-    v.add( rank=iproc, idx=[range(len(dofs))], data=values )
+  print v.toarray()
 
 # for iproc, dofs in enumerate( rowdofmap ):
 #   values = (numpy.array(dofs)+1)*10

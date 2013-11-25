@@ -150,6 +150,10 @@ class LibMatrix( InterComm ):
     return self.gather_equal( scalar_t )
 
   @bcast_token
+  def vector_complete( self, vector_handle, export_handle ):
+    self.bcast( [ vector_handle, export_handle ], handle_t )
+
+  @bcast_token
   def matrix_new( self, graph_handle ):
     matrix_handle = self.claim_handle()
     self.bcast( [ matrix_handle, graph_handle ], handle_t )
@@ -272,6 +276,12 @@ class Vector( Object ):
     assert isinstance( other, Vector )
     assert self.size == other.size
     return self.comm.vector_dot( self.handle, other.handle )
+
+  def complete( self, export ):
+    assert isinstance( export, Export )
+    assert export.srcmap == self.map
+    self.comm.vector_complete( self.handle, export.handle )
+    self.map = export.dstmap
 
 
 class Operator( Object ):
