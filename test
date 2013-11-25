@@ -40,13 +40,13 @@ def test( nprocs, size ):
 
   params.cprint()
 
-  rowmap = libmatrix.Map( comm, globs=rowdofmap ) # overlapping
-  domainmap = libmatrix.Map( comm, globs=domaindofmap ) # 1-to-1
+  rowmap = libmatrix.Map( comm, size, rowdofmap ) # overlapping
+  domainmap = libmatrix.Map( comm, size, domaindofmap ) # 1-to-1
   export = libmatrix.Export( comm, rowmap, domainmap )
 
   v_npy = numpy.arange(1,size+1) * 10
 
-  v = libmatrix.Vector( comm, size, rowmap )
+  v = libmatrix.Vector( comm, rowmap )
 
   for iproc, dofs in enumerate( rowdofmap ):
     values = v_npy[dofs]
@@ -79,7 +79,7 @@ def test( nprocs, size ):
 
   graph = libmatrix.Graph( comm, rowmap, rowmap, rows=nzmap )
 
-  A = libmatrix.Matrix( comm, (size,size), graph )
+  A = libmatrix.Matrix( comm, graph )
   for iproc, dofs in enumerate( rowdofmap ):
     for i in range( len(dofs)-1 ):
       idx = i, i+1
@@ -105,7 +105,7 @@ def test( nprocs, size ):
   numbers = []
   for iproc, dofs in enumerate(domaindofmap):
     for idof in range(len(dofs)):
-      ei = libmatrix.Vector( comm, size, domainmap )
+      ei = libmatrix.Vector( comm, domainmap )
       ei.add( rank=iproc, idx=[[idof]], data=[1] )
       print 'unit vector iproc=%d idof=%d:' % (iproc,idof), ei.toarray()
       vectors.append( A.matvec( ei ).toarray() )

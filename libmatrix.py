@@ -80,14 +80,14 @@ class LibMatrix( InterComm ):
     self.bcast( handle, handle_t )
 
   @bcast_token
-  def map_new( self, globs ):
+  def map_new( self, local2global ):
     map_handle = self.claim_handle()
-    lengths = map( len, globs )
+    lengths = map( len, local2global )
     size = sum( lengths ) # TODO check meaning of size in map constructor
     self.bcast( map_handle, handle_t )
     self.bcast( size, size_t )
     self.scatter( lengths, size_t )
-    self.scatterv( globs, global_t )
+    self.scatterv( local2global, global_t )
     return map_handle
 
   @bcast_token
@@ -130,12 +130,12 @@ class LibMatrix( InterComm ):
     self.send( rank, data, scalar_t )
 
   @bcast_token
-  def vector_getdata( self, vec_handle, size, globs ):
+  def vector_getdata( self, vec_handle, size, local2global ):
     self.bcast( vec_handle, handle_t )
     array = numpy.zeros( size ) # TODO fix length
-    lengths = map( len, globs )
+    lengths = map( len, local2global )
     local_arrays = self.gatherv( lengths, scalar_t )
-    for idx, local_array in zip( globs, local_arrays ):
+    for idx, local_array in zip( local2global, local_arrays ):
       array[idx] += local_array
     return array
 
@@ -248,16 +248,29 @@ class ParameterList( Object ):
 
 class Map( Object ):
 
-  def __init__( self, comm, globs ):
-    assert len(globs) == comm.nprocs
-    self.globs = [ numpy.asarray(glob,dtype=int) for glob in globs ]
-    Object.__init__( self, comm, comm.map_new( globs ) )
+  __global2local = None
+
+  def __init__( self, comm, size, local2global ):
+    assert len(local2global) == comm.nprocs
+    self.local2global = [ numpy.asarray( arr, dtype=global_t ) for arr in local2global ]
+    self.size = size
+    Object.__init__( self, comm, comm.map_new( self.local2global ) )
+
+  @property
+  def global2local( self ):
+    if self.__global2local is None:
+      self.__global2local = numpy.empty( [ self.comm.nprocs, self.size ], dtype=local_t )
+      self.__global2local[:] = -1
+      arange = numpy.arange( self.size, dtype=local_t )
+      for g2l, l2g in zip( self.__global2local, self.local2global ):
+        g2l[l2g] = arange
+    return self.__global2local
 
 
 class Vector( Object ):
 
-  def __init__( self, comm, size, map ):
-    self.size = size
+  def __init__( self, comm, map ):
+    self.size = map.size
     assert isinstance( map, Map )
     self.map = map
     Object.__init__( self, comm, comm.vector_new( map.handle ) )
@@ -267,7 +280,7 @@ class Vector( Object ):
     self.comm.vector_add_block( self.handle, rank, idx, data )
 
   def toarray( self ):
-    return self.comm.vector_getdata( self.handle, self.size, self.map.globs )
+    return self.comm.vector_getdata( self.handle, self.size, self.map.local2global )
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
@@ -304,10 +317,11 @@ class Precon( Operator ):
 
 class Matrix( Operator ):
 
-  def __init__( self, comm, shape, graph ):
+  def __init__( self, comm, graph ):
     assert isinstance( graph, Graph )
+    self.shape = graph.rowmap.size, graph.colmap.size
     self.graph = graph
-    Operator.__init__( self, comm, comm.matrix_new(graph.handle), shape )
+    Operator.__init__( self, comm, comm.matrix_new(graph.handle), self.shape )
 
   def add( self, rank, idx, data ):
     rowidx, colidx = idx
@@ -326,7 +340,7 @@ class Matrix( Operator ):
     assert isinstance( vec, Vector )
     assert vec.map == self.domainmap
     assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.shape[0], self.rangemap )
+    out = Vector( self.comm, self.rangemap )
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
@@ -337,7 +351,7 @@ class Matrix( Operator ):
       params = ParameterList( self.comm )
     assert isinstance( params, ParameterList )
     assert self.shape[0] == rhs.size
-    lhs = Vector( self.comm, self.shape[1], self.domainmap )
+    lhs = Vector( self.comm, self.domainmap )
     self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( name ), symmetric, params.handle )
     return lhs
 
