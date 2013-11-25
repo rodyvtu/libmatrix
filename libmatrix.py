@@ -20,6 +20,14 @@ bool_t   = numpy.dtype( _info.pop( 'bool_t'   ) )
 token_t  = numpy.dtype( _info.pop( 'token_t'  ) )
 char_t   = numpy.dtype( 'str' )
 
+def cacheprop( f ):
+  cache = []
+  def wrapped( self ):
+    if not cache:
+      cache.append( f(self) )
+    return cache[0]
+  return property( wrapped )
+
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
     int_token = _functions.index( func.func_name + '<number_t>' )
@@ -173,7 +181,6 @@ class LibMatrix( InterComm ):
     self.bcast( rank, size_t )
     self.send( rank, handle, handle_t )
     self.send( rank, shape, size_t )
-    print rowidx, colidx
     self.send( rank, rowidx, global_t )
     self.send( rank, colidx, global_t )
     self.send( rank, data.ravel(), scalar_t )
@@ -225,7 +232,8 @@ class Object( object ):
     self.handle = handle
 
   def __del__ ( self ):
-    self.comm.release( self.handle )
+    if hasattr( self, 'comm' ):
+      self.comm.release( self.handle )
 
 
 class ParameterList( Object ):
@@ -248,23 +256,49 @@ class ParameterList( Object ):
 
 class Map( Object ):
 
-  __global2local = None
-
-  def __init__( self, comm, size, local2global ):
-    assert len(local2global) == comm.nprocs
-    self.local2global = [ numpy.asarray( arr, dtype=global_t ) for arr in local2global ]
+  def __init__( self, comm, size, globaldofs ):
+    assert len(globaldofs) == comm.nprocs
+    free = numpy.ones( size, dtype=bool )
+    used = []
+    owned = []
+    is1to1 = True
+    for idx in globaldofs:
+      idx = numpy.asarray( idx, dtype=global_t )
+      new = free[idx]
+      if new.all():
+        owned.append( idx )
+      else:
+        tmp = idx[new]
+        idx = numpy.concatenate([ tmp, idx[~new] ])
+        owned.append( idx[:tmp.size] )
+        is1to1 = False
+      used.append( idx )
+      free[idx] = False
+    assert not free.any()
+    self.local2global = used
+    self.local2global_owned = owned
     self.size = size
+    self.is1to1 = is1to1
     Object.__init__( self, comm, comm.map_new( self.local2global ) )
 
-  @property
+  @cacheprop
   def global2local( self ):
-    if self.__global2local is None:
-      self.__global2local = numpy.empty( [ self.comm.nprocs, self.size ], dtype=local_t )
-      self.__global2local[:] = -1
-      arange = numpy.arange( self.size, dtype=local_t )
-      for g2l, l2g in zip( self.__global2local, self.local2global ):
-        g2l[l2g] = arange
-    return self.__global2local
+    global2local = numpy.empty( [ self.comm.nprocs, self.size ], dtype=local_t )
+    global2local[:] = -1
+    arange = numpy.arange( self.size, dtype=local_t )
+    for g2l, l2g in zip( global2local, self.local2global ):
+      g2l[l2g] = arange
+    return global2local
+
+  @cacheprop
+  def ownedmap( self ):
+    ownedmap = Map( self.comm, self.size, self.local2global_owned )
+    assert ownedmap.is1to1
+    return ownedmap
+
+  @cacheprop
+  def export( self ):
+    return Export( self.comm, self, self.ownedmap )
 
 
 class Vector( Object ):
@@ -278,6 +312,12 @@ class Vector( Object ):
   def add( self, rank, idx, data ):
     idx, = idx
     self.comm.vector_add_block( self.handle, rank, idx, data )
+
+  def add_global( self, idx, data ):
+    idx, = idx
+    local = self.map.global2local[:,idx]
+    rank = ( local != -1 ).all( axis=1 ).nonzero()[0][0]
+    self.add( rank, [local[rank]], data )
 
   def toarray( self ):
     return self.comm.vector_getdata( self.handle, self.size, self.map.local2global )
@@ -326,6 +366,13 @@ class Matrix( Operator ):
   def add( self, rank, idx, data ):
     rowidx, colidx = idx
     self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
+
+  def add_global( self, idx, data ):
+    rowidx, colidx = idx
+    rowlocal = self.graph.rowmap.global2local[:,rowidx]
+    collocal = self.graph.colmap.global2local[:,colidx]
+    rank = ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ).nonzero()[0][0]
+    self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
   def complete( self, exporter ):
     assert isinstance( exporter, Export )

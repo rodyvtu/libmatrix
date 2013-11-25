@@ -14,7 +14,7 @@ class InterComm( object ):
 
   def bcast( self, data, dtype=None ):
     if dtype is not None:
-      data = numpy.asarray( data, dtype )
+      data = numpy.ascontiguousarray( data, dtype )
     else:
       assert isinstance( data, numpy.ndarray )
     self.__comm.Bcast( [ data, MPI.BYTE ], root=MPI.ROOT )
@@ -30,7 +30,7 @@ class InterComm( object ):
     return array[0]
   
   def scatter( self, array, dtype ):
-    array = numpy.asarray( array, dtype=dtype )
+    array = numpy.ascontiguousarray( array, dtype=dtype )
     self.__comm.Scatter( [ array, MPI.BYTE ], None, root=MPI.ROOT )
   
   def scatterv( self, arrays, dtype ):
@@ -49,7 +49,7 @@ class InterComm( object ):
     return arrays
   
   def send( self, rank, array, dtype ):
-    array = numpy.asarray( array, dtype )
+    array = numpy.ascontiguousarray( array, dtype )
     self.__comm.Send( [ array, MPI.BYTE ], rank, tag=0 )
 
   def verify( self ):

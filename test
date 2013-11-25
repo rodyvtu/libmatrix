@@ -16,44 +16,25 @@ def test( nprocs, size ):
   for iproc, dofs in enumerate( rowdofmap ):
     print '  proc %d:' % iproc, dofs
 
-  bounds[-1] += 1
-  print '1-to-1 dof assignments:'
-  domaindofmap = map( range, bounds[:-1], bounds[1:] )
-  for iproc, dofs in enumerate( domaindofmap ):
-    print '  proc %d:' % iproc, dofs
+  comm = libmatrix.LibMatrix( nprocs=nprocs )
+  rowmap = libmatrix.Map( comm, size, rowdofmap ) # overlapping
+  print '->', rowmap.local2global
 
   block = numpy.array([[1,-1],[-1,1]])
   print 'block:'
   print block
 
-  print 'sparsity:'
-  nzmap = [ [ dofs[max(0,idof-1):idof+2] - dofs[0] for idof in range( len(dofs) ) ] for iproc, dofs in enumerate( rowdofmap ) ]
-  for iproc, nz in enumerate( nzmap ):
-    print '  proc %d:' % iproc, nz
-
-  comm = libmatrix.LibMatrix( nprocs=nprocs )
-
-  print 'creating parameter list object'
-  params = libmatrix.ParameterList( comm )
-  params['H2G2'] = 42
-  params['pi'] = numpy.pi
-
-  params.cprint()
-
-  rowmap = libmatrix.Map( comm, size, rowdofmap ) # overlapping
-  domainmap = libmatrix.Map( comm, size, domaindofmap ) # 1-to-1
-  export = libmatrix.Export( comm, rowmap, domainmap )
+  export = rowmap.export
 
   v_npy = numpy.arange(1,size+1) * 10
 
   v = libmatrix.Vector( comm, rowmap )
 
-  for iproc, dofs in enumerate( rowdofmap ):
-    values = v_npy[dofs]
-    values[0] /= 2
-    values[-1] /= 2
-    print 'adding', values, ' to ', dofs, ' on proc', iproc
-    v.add( rank=iproc, idx=[range(len(dofs))], data=values )
+  for i in range(size-1):
+    dofs = numpy.arange(i,i+2)
+    values = v_npy[i:i+2] / 2.
+    print 'adding', values, ' to ', dofs
+    v.add_global( idx=[dofs], data=values )
 
   v.complete( export )
 
@@ -61,13 +42,6 @@ def test( nprocs, size ):
   v_npy[-1] /= 2
 
   print v.toarray()
-
-# for iproc, dofs in enumerate( rowdofmap ):
-#   values = (numpy.array(dofs)+1)*10
-#   values[0] /= 2
-#   values[-1] /= 2
-#   print 'adding', values, ' to ', dofs, ' on proc', iproc
-#   v.add( rank=iproc, idx=dofs, data=values )
 
   print 'resulting vector:', v.toarray()
   print 'reference vector:', v_npy
@@ -77,14 +51,24 @@ def test( nprocs, size ):
   print 'resulting norm:', norm
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
+  print 'sparsity:'
+  nzmap = [ [ [] for d in dofs ] for dofs in rowdofmap ]
+  for i in range(size-1):
+    local = rowmap.global2local[:,i:i+2]
+    rank = ( local != -1 ).all( axis=1 ).nonzero()[0][0]
+    i, j = local[rank]
+    nzmap[rank][i].extend([i,j])
+    nzmap[rank][j].extend([i,j])
+  nzmap = [ map( numpy.unique, nz ) for nz in nzmap ]
+  for iproc, nz in enumerate( nzmap ):
+    print '  proc %d:' % iproc, nz
   graph = libmatrix.Graph( comm, rowmap, rowmap, rows=nzmap )
 
   A = libmatrix.Matrix( comm, graph )
-  for iproc, dofs in enumerate( rowdofmap ):
-    for i in range( len(dofs)-1 ):
-      idx = i, i+1
-      print 'adding block to ', idx, ' on proc', iproc
-      A.add( rank=iproc, idx=[idx,idx], data=block )
+  for i in range(size-1):
+    idx = numpy.arange(i,i+2)
+    print 'adding block to ', idx
+    A.add_global( idx=[idx,idx], data=block )
 
   #A.add( rank=0, rowidx=[0,size-1], colidx=[0,size-1], data=block )
 
@@ -103,13 +87,13 @@ def test( nprocs, size ):
 
   vectors = []
   numbers = []
-  for iproc, dofs in enumerate(domaindofmap):
-    for idof in range(len(dofs)):
-      ei = libmatrix.Vector( comm, domainmap )
-      ei.add( rank=iproc, idx=[[idof]], data=[1] )
-      print 'unit vector iproc=%d idof=%d:' % (iproc,idof), ei.toarray()
-      vectors.append( A.matvec( ei ).toarray() )
-      numbers.append( v.dot( ei ) )
+  for i in range(size):
+    ei = libmatrix.Vector( comm, rowmap )
+    ei.add_global( idx=[[i]], data=[1] )
+    ei.complete( export )
+    print 'unit vector i=%d:' % i, ei.toarray()
+    vectors.append( A.matvec( ei ).toarray() )
+    numbers.append( v.dot( ei ) )
 
   B = numpy.array( vectors )
   print B
