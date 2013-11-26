@@ -295,6 +295,8 @@ class Map( Object ):
 
   @cacheprop
   def ownedmap( self ):
+    if self.is1to1:
+      return self
     ownedmap = Map( self.comm, self.size, self.local2global_owned )
     assert ownedmap.is1to1
     return ownedmap
