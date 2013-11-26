@@ -8,17 +8,16 @@ def test( nprocs, size ):
   print 'testing on %d processors' % nprocs
   print 'total dofs:', size
 
-  dofs = numpy.arange( size )
-  bounds = ( (size-1) * numpy.arange( nprocs+1, dtype=float ) / nprocs ).astype( int )
-
   print 'row dof assignments:'
+  bounds = ( (size-1) * numpy.arange( nprocs+1, dtype=float ) / nprocs ).astype( int )
   rowdofmap = map( numpy.arange, bounds[:-1], bounds[1:]+1 )
   for iproc, dofs in enumerate( rowdofmap ):
     print '  proc %d:' % iproc, dofs
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
   rowmap = libmatrix.Map( comm, size, rowdofmap ) # overlapping
-  print '->', rowmap.local2global
+  print 'USED: ', rowmap.local2global
+  print 'OWNED: ', rowmap.local2global_owned
 
   block = numpy.array([[1,-1],[-1,1]])
   print 'block:'

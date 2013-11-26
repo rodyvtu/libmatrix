@@ -258,28 +258,31 @@ class Map( Object ):
 
   def __init__( self, comm, size, globaldofs ):
     assert len(globaldofs) == comm.nprocs
+    self.local2global, self.local2global_owned = self.distribute( globaldofs, size )
+    self.size = size
+    self.is1to1 = self.local2global is self.local2global_owned
+    Object.__init__( self, comm, comm.map_new( self.local2global ) )
+
+  @staticmethod
+  def distribute( globaldofs, size ):
     free = numpy.ones( size, dtype=bool )
-    used = []
-    owned = []
+    used = [ None ] * len(globaldofs)
+    owned = [ None ] * len(globaldofs)
     is1to1 = True
-    for idx in globaldofs:
-      idx = numpy.asarray( idx, dtype=global_t )
+    for i in numpy.argsort( map( len, globaldofs ) ):
+      idx = numpy.asarray( globaldofs[i], dtype=global_t )
       new = free[idx]
       if new.all():
-        owned.append( idx )
+        owned[i] = idx
       else:
         tmp = idx[new]
         idx = numpy.concatenate([ tmp, idx[~new] ])
-        owned.append( idx[:tmp.size] )
+        owned[i] = idx[:tmp.size]
         is1to1 = False
-      used.append( idx )
+      used[i] = idx
       free[idx] = False
     assert not free.any()
-    self.local2global = used
-    self.local2global_owned = owned
-    self.size = size
-    self.is1to1 = is1to1
-    Object.__init__( self, comm, comm.map_new( self.local2global ) )
+    return used, used if is1to1 else owned
 
   @cacheprop
   def global2local( self ):
