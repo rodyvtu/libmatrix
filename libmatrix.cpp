@@ -630,7 +630,7 @@ void eventloop( char *progname ) {
   for ( ;; ) {
     intercomm.out() << "waiting" << std::endl;
     intercomm.bcast( &c );
-    intercomm.out() << "received " << c << std::endl;
+    intercomm.out() << "received " << (int) c << std::endl;
     if ( c >= NFUNCS ) {
       intercomm.out() << "quit" << std::endl;
       break;
