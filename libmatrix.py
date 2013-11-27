@@ -134,7 +134,7 @@ class LibMatrix( InterComm ):
     self.bcast( rank, size_t )
     self.send( rank, handle, handle_t )
     self.send( rank, n, size_t )
-    self.send( rank, idx, global_t )
+    self.send( rank, idx, local_t )
     self.send( rank, data, scalar_t )
 
   @bcast_token
@@ -181,8 +181,8 @@ class LibMatrix( InterComm ):
     self.bcast( rank, size_t )
     self.send( rank, handle, handle_t )
     self.send( rank, shape, size_t )
-    self.send( rank, rowidx, global_t )
-    self.send( rank, colidx, global_t )
+    self.send( rank, rowidx, local_t )
+    self.send( rank, colidx, local_t )
     self.send( rank, data.ravel(), scalar_t )
 
   @bcast_token
