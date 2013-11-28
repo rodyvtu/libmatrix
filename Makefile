@@ -14,10 +14,9 @@ FUNCTIONS := \
 null :=
 space := $(null) #
 comma := ,
-functions_sep := $(subst $(space),$(comma) ,$(FUNCTIONS))
 macros := \
-	-DFUNCNAMES='"$(functions_sep)"' \
-	-DFUNCS='$(foreach token,$(functions_sep),&LibMatrix::$(token))'
+	-DFUNCNAMES='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),std::string("$(token)")))' \
+	-DFUNCS='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),&LibMatrix::$(token)))'
 
 libmatrix.mpi: libmatrix.cpp
 	mpic++ $< -o $@ -std=c++11 $(macros) $(foreach library,$(LIBRARIES),-l$(library))
