@@ -162,9 +162,15 @@ class LibMatrix( InterComm ):
     self.bcast( [ vector_handle, export_handle ], handle_t )
 
   @bcast_token
-  def matrix_new( self, graph_handle ):
+  def matrix_new_static( self, graph_handle ):
     matrix_handle = self.claim_handle()
     self.bcast( [ matrix_handle, graph_handle ], handle_t )
+    return matrix_handle
+
+  @bcast_token
+  def matrix_new_dynamic( self, rowmap_handle, colmap_handle ):
+    matrix_handle = self.claim_handle()
+    self.bcast( [ matrix_handle, rowmap_handle, colmap_handle ], handle_t )
     return matrix_handle
 
   @bcast_token
@@ -360,11 +366,21 @@ class Precon( Operator ):
 
 class Matrix( Operator ):
 
-  def __init__( self, comm, graph ):
-    assert isinstance( graph, Graph )
-    self.shape = graph.rowmap.size, graph.colmap.size
-    self.graph = graph
-    Operator.__init__( self, comm, comm.matrix_new(graph.handle), self.shape )
+  def __init__( self, comm, init ):
+    if isinstance( init, Graph ):
+      self.rowmap = init.rowmap
+      self.colmap = init.colmap
+      matrix_handle = comm.matrix_new_static( init.handle )
+    else:
+      if isinstance( init, Map ):
+        self.rowmap = self.colmap = init
+      else:
+        self.rowmap, self.colmap = init
+        assert isinstance( self.rowmap, Map )
+        assert isinstance( self.colmap, Map )
+      matrix_handle = comm.matrix_new_dynamic( self.rowmap.handle, self.colmap.handle )
+    self.shape = self.rowmap.size, self.colmap.size
+    Operator.__init__( self, comm, matrix_handle, self.shape )
 
   def add( self, rank, idx, data ):
     rowidx, colidx = idx
@@ -372,14 +388,14 @@ class Matrix( Operator ):
 
   def add_global( self, idx, data ):
     rowidx, colidx = idx
-    rowlocal = self.graph.rowmap.global2local[:,rowidx]
-    collocal = self.graph.colmap.global2local[:,colidx]
+    rowlocal = self.rowmap.global2local[:,rowidx]
+    collocal = self.colmap.global2local[:,colidx]
     rank = ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ).nonzero()[0][0]
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
   def complete( self, exporter ):
     assert isinstance( exporter, Export )
-    assert self.graph.rowmap == exporter.srcmap
+    assert self.rowmap == exporter.srcmap
     self.comm.matrix_complete( self.handle, exporter.handle )
     self.domainmap = self.rangemap = exporter.dstmap
 
