@@ -91,12 +91,12 @@ public:
       objects[handle] = object;
     }
   }
-  
+
   template <class T>
   inline Teuchos::RCP<T> get_object( handle_t handle ) {
     return Teuchos::rcp_dynamic_cast<T>( objects[handle], true );
   }
-  
+
   inline void release_object( handle_t handle ) {
     objects[handle] = Teuchos::RCP<Teuchos::Describable>();
   }
@@ -423,7 +423,7 @@ public:
     set_object( handle.graph, graph );
   }
   
-  void matrix_new() /* create new matrix
+  void matrix_new_static() /* create new matrix
      
        -> broadcast HANDLE handle.{matrix,graph}
   */{
@@ -439,7 +439,25 @@ public:
   
     set_object( handle.matrix, matrix );
   }
-  
+
+  void matrix_new_dynamic() /* create new matrix
+
+       -> broadcast HANDLE handle.{matrix,rowmap,colmap}
+  */{
+
+    struct { handle_t matrix, rowmap, colmap; } handle;
+    bcast( &handle );
+
+    out() << "creating matrix #" << handle.matrix << " from rowmap #" << handle.rowmap << " and colmap #" << handle.colmap << std::endl;
+
+    Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
+    Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
+
+    Teuchos::RCP<matrix_t> matrix = Teuchos::rcp( new matrix_t( rowmap, colmap, 0 ) );
+
+    set_object( handle.matrix, matrix );
+  }
+
   void matrix_add_block() /* add items to matrix
      
        -> broadcast SIZE rank
@@ -469,25 +487,35 @@ public:
   
     Teuchos::ArrayRCP<local_t> rowidx( nitems[0] );
     Teuchos::ArrayRCP<local_t> colidx( nitems[1] );
-    Teuchos::ArrayRCP<scalar_t> data( nitems[0]*nitems[1] );
+    Teuchos::ArrayRCP<scalar_t> data( nitems[0] * nitems[1] );
   
     recv( rowidx.getRawPtr(), nitems[0] );
     recv( colidx.getRawPtr(), nitems[1] );
-    recv( data.getRawPtr(), nitems[0]*nitems[1] );
+    recv( data.getRawPtr(), nitems[0] * nitems[1] );
   
     Teuchos::RCP<matrix_t> mat = get_object<matrix_t>( handle.matrix );
     Teuchos::RCP<const graph_t> graph = mat->getCrsGraph();
   
-    const Teuchos::ArrayView<const local_t> colidx_view = colidx.view( 0, nitems[1] );
-    Teuchos::ArrayView<const local_t> icols;
+    Teuchos::ArrayView<const local_t> current_icols;
+    Teuchos::ArrayRCP<local_t> this_colidx( nitems[1] );
+    Teuchos::ArrayRCP<scalar_t> this_data( nitems[1] );
     for ( local_t irow = 0; irow < nitems[0]; irow++ ) {
-      graph->getLocalRowView( rowidx[irow], icols );
-      for ( auto icol : colidx_view ) {
-        ASSERT( contains( icols, icol ) );
+      int nnew = 0;
+      graph->getLocalRowView( rowidx[irow], current_icols );
+      for ( int icol = 0; icol < nitems[1]; icol++ ) {
+        int i = contains( current_icols, colidx[icol] ) ? icol - nnew : nitems[1] - (++nnew);
+        this_colidx[i] = colidx[icol];
+        this_data[i] = data[irow*nitems[1]+icol];
       }
-      mat->sumIntoLocalValues( rowidx[irow], colidx_view, data.view(irow*nitems[0],nitems[1]) );
+      if ( nnew > 0 ) {
+        out() << "inserting " << nnew << " new items in row " << irow << std::endl;
+        mat->insertLocalValues( rowidx[irow], this_colidx.view(nitems[1]-nnew,nnew), this_data.view(nitems[1]-nnew,nnew) );
+      }
+      if ( nnew < nitems[1] ) {
+        out() << "adding " << nnew << " existing items in row " << irow << std::endl;
+        mat->sumIntoLocalValues( rowidx[irow], this_colidx.view(0,nitems[1]-nnew), this_data.view(0,nitems[1]-nnew) );
+      }
     }
-  
   }
   
   void matrix_complete() /* export matrix and fill-complete
@@ -684,7 +712,7 @@ int main( int argc, char *argv[] ) {
         (intercomm.*FTABLE[c])();
       }
       catch ( const char *s ) {
-        intercomm.out() << "error in " << funcnames[c] << ": " << s << std::endl;
+        std::cerr << "error in " << funcnames[c] << ": " << s << std::endl;
         intercomm.abort();
         break;
       }

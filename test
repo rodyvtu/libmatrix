@@ -50,27 +50,13 @@ def test( nprocs, size ):
   print 'resulting norm:', norm
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
-  print 'sparsity:'
-  nzmap = [ [ [] for d in dofs ] for dofs in rowdofmap ]
-  for i in range(size-1):
-    local = rowmap.global2local[:,i:i+2]
-    rank = ( local != -1 ).all( axis=1 ).nonzero()[0][0]
-    i, j = local[rank]
-    nzmap[rank][i].extend([i,j])
-    nzmap[rank][j].extend([i,j])
-  nzmap = [ map( numpy.unique, nz ) for nz in nzmap ]
-  for iproc, nz in enumerate( nzmap ):
-    print '  proc %d:' % iproc, nz
-  graph = libmatrix.Graph( comm, rowmap, rowmap, rows=nzmap )
-
-  A = libmatrix.Matrix( comm, graph )
+  comm.toggle_stdout()
+  A = libmatrix.Matrix( comm, rowmap )
   for i in range(size-1):
     idx = numpy.arange(i,i+2)
     print 'adding block to ', idx
     A.add_global( idx=[idx,idx], data=block )
-
-  #A.add( rank=0, rowidx=[0,size-1], colidx=[0,size-1], data=block )
-
+  comm.toggle_stdout()
   A.complete( export )
 
   A_npy = numpy.eye(size,size) * 2 - numpy.eye(size,size,1) - numpy.eye(size,size,-1)
