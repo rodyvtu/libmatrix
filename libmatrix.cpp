@@ -15,8 +15,7 @@
 
 #include <mpi.h>
 
-  
-#define ASSERT( cond ) if ( ! ( cond ) ) { printf( "assertion failed in %s (" __FILE__ ":%d), " #cond, __FUNCTION__, __LINE__ ); MPI::Finalize(); exit( EXIT_FAILURE ); }
+#define ASSERT( cond ) if ( ! (cond) ) throw( "assertion failed: " #cond );
 
 Teuchos::oblackholestream blackHole;
 
@@ -29,6 +28,27 @@ auto supportedPreconNames = Teuchos::tuple(
   std::string( "SCHWARZ" ),
   std::string( "KRYLOV" )
 );
+
+template <class T>
+void print_all( const char name[], T iterable ) {
+  std::cout << name;
+  char sep[] = ": ";
+  for ( auto item : iterable ) {
+    std::cout << sep << item;
+    sep[0] = ',';
+  }
+  std::cout << std::endl;
+}
+
+template <class T, class V>
+inline bool contains( T iterable, V value ) {
+  for ( auto item : iterable ) {
+    if ( item == value ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 class DescribableParams : public Teuchos::Describable, public Teuchos::ParameterList {};
 
@@ -134,6 +154,10 @@ public:
   template <class T>
   inline void gather( T *data, const int n=1 ) {
     comm.Gather( (void *)data, n * sizeof(T), MPI::BYTE, NULL, 0, MPI::BYTE, 0 );
+  }
+
+  void abort( int errorcode=1 ) {
+    comm.Abort( errorcode );
   }
 
 public:
@@ -452,10 +476,16 @@ public:
     recv( data.getRawPtr(), nitems[0]*nitems[1] );
   
     Teuchos::RCP<matrix_t> mat = get_object<matrix_t>( handle.matrix );
+    Teuchos::RCP<const graph_t> graph = mat->getCrsGraph();
   
     const Teuchos::ArrayView<const local_t> colidx_view = colidx.view( 0, nitems[1] );
-    for ( int i = 0; i < nitems[0]; i++ ) {
-      mat->sumIntoLocalValues( rowidx[i], colidx_view, data.view(i*nitems[0],nitems[1]) );
+    Teuchos::ArrayView<const local_t> icols;
+    for ( local_t irow = 0; irow < nitems[0]; irow++ ) {
+      graph->getLocalRowView( rowidx[irow], icols );
+      for ( auto icol : colidx_view ) {
+        ASSERT( contains( icols, icol ) );
+      }
+      mat->sumIntoLocalValues( rowidx[irow], colidx_view, data.view(irow*nitems[0],nitems[1]) );
     }
   
   }
@@ -620,47 +650,17 @@ private:
 
 };
 
-void eventloop( char *progname ) {
-
-  LibMatrix::funcptr FTABLE[] = { FUNCS };
-  const size_t NFUNCS = sizeof(FTABLE) / sizeof(LibMatrix::funcptr);
-
-  LibMatrix intercomm( progname );
-  token_t c;
-  for ( ;; ) {
-    intercomm.out() << "waiting" << std::endl;
-    intercomm.bcast( &c );
-    intercomm.out() << "received " << (int) c << std::endl;
-    if ( c >= NFUNCS ) {
-      intercomm.out() << "quit" << std::endl;
-      break;
-    }
-    (intercomm.*FTABLE[c])();
-  }
-}
-
 int main( int argc, char *argv[] ) {
 
+  const LibMatrix::funcptr FTABLE[] = { FUNCS };
+  const size_t NFUNCS = sizeof(FTABLE) / sizeof(LibMatrix::funcptr);
+  const std::string _funcnames[] = { FUNCNAMES };
+  const std::vector<std::string> funcnames( _funcnames, _funcnames + NFUNCS );
+
   if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
-
-    std::cout << "functions: " << FUNCNAMES << std::endl;
-
-    std::cout << "solvers";
-    {char sep[] = ": ";
-    for ( auto name : solverfactory_t().supportedSolverNames() ) {
-      std::cout << sep << name;
-      sep[0] = ',';
-    }}
-    std::cout << std::endl;
-
-    std::cout << "precons";
-    {char sep[] = ": ";
-    for ( auto name : supportedPreconNames ) {
-      std::cout << sep << name;
-      sep[0] = ',';
-    }}
-    std::cout << std::endl;
-
+    print_all( "functions", funcnames );
+    print_all( "solvers", solverfactory_t().supportedSolverNames() );
+    print_all( "precons", supportedPreconNames );
     std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;
     std::cout << "local_t: int" << (sizeof(local_t) << 3) << std::endl;
     std::cout << "global_t: int" << (sizeof(global_t) << 3) << std::endl;
@@ -671,7 +671,26 @@ int main( int argc, char *argv[] ) {
     std::cout << "scalar_t: float" << (sizeof(scalar_t) << 3) << std::endl;
   }
   else if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
-    eventloop( argv[0] );
+    LibMatrix intercomm( argv[0] );
+    token_t c;
+    for ( ;; ) {
+      intercomm.bcast( &c );
+      if ( c >= NFUNCS ) {
+        intercomm.out() << "quit" << std::endl;
+        break;
+      }
+      intercomm.out() << "enter " << funcnames[c] << std::endl;
+      try {
+        (intercomm.*FTABLE[c])();
+      }
+      catch ( const char *s ) {
+        intercomm.out() << "error in " << funcnames[c] << ": " << s << std::endl;
+        intercomm.abort();
+        break;
+      }
+      intercomm.out() << "leave " << funcnames[c] << std::endl;
+    }
+    intercomm.out() << "EXIT" << std::endl;
   }
   else {
     std::cout << "syntax: " << argv[0] << " info|eventloop" << std::endl;
