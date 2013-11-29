@@ -359,9 +359,12 @@ class Vector( Object ):
     assert self.size == other.size
     return self.comm.vector_dot( self.handle, other.handle )
 
-  def complete( self, export ):
-    assert isinstance( export, Export )
-    assert export.srcmap == self.map
+  def complete( self, export=None ):
+    if export:
+      assert isinstance( export, Export )
+      assert export.srcmap == self.map
+    else:
+      export = self.map.export
     self.comm.vector_complete( self.handle, export.handle )
     self.map = export.dstmap
 
@@ -413,11 +416,14 @@ class Matrix( Operator ):
     rank = first( ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ) )
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
-  def complete( self, exporter ):
-    assert isinstance( exporter, Export )
-    assert self.rowmap == exporter.srcmap
-    self.comm.matrix_complete( self.handle, exporter.handle )
-    self.domainmap = self.rangemap = exporter.dstmap
+  def complete( self, export=None ):
+    if export:
+      assert isinstance( export, Export )
+      assert self.rowmap == export.srcmap
+    else:
+      export = self.rowmap.export
+    self.comm.matrix_complete( self.handle, export.handle )
+    self.domainmap = self.rangemap = export.dstmap
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
