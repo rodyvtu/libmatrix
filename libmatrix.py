@@ -28,11 +28,11 @@ def cacheprop( f ):
     return cache[0]
   return property( wrapped )
 
-def first( iterable ):
-  for i, item in enumerate( iterable ):
-    if item:
-      return i
-  raise Exception, 'no nonzero value found'
+def where( array ):
+  return numpy.nonzero( array )[0]
+
+def first( array ):
+  return where( array )[0]
 
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
@@ -268,33 +268,45 @@ class ParameterList( Object ):
 
 class Map( Object ):
 
-  def __init__( self, comm, size, globaldofs ):
-    assert len(globaldofs) == comm.nprocs
-    self.local2global, self.local2global_owned = self.distribute( globaldofs, size )
+  def __init__( self, comm, used, size=None ):
+    if isinstance( used, numpy.ndarray ) and used.dtype == bool:
+      assert used.ndim == 2
+      assert used.shape[0] == comm.nprocs
+      if size is not None:
+        assert used.shape[1] == size
+      else:
+        size = used.shape[1]
+    else:
+      indices = used
+      assert len(indices) == comm.nprocs
+      assert size is not None
+      used = numpy.zeros( [ comm.nprocs, size ], dtype=bool )
+      for iproc, idx in enumerate( indices ):
+        used[ iproc, idx ] = True
+
+    self.owned = self.__distribute( used )
+    self.local2global = []
+    self.is1to1 = True
+    for x, y in zip( self.owned, used & ~self.owned ):
+      x = where( x )
+      y = where( y )
+      if y.size:
+        x = numpy.concatenate([ x, y ])
+        self.is1to1 = False
+      self.local2global.append( x )
+
     self.size = size
-    self.is1to1 = self.local2global is self.local2global_owned
     Object.__init__( self, comm, comm.map_new( self.local2global ) )
 
   @staticmethod
-  def distribute( globaldofs, size ):
-    free = numpy.ones( size, dtype=bool )
-    used = [ None ] * len(globaldofs)
-    owned = [ None ] * len(globaldofs)
-    is1to1 = True
-    for i in numpy.argsort( map( len, globaldofs ) ):
-      idx = numpy.asarray( globaldofs[i], dtype=global_t )
-      new = free[idx]
-      if new.all():
-        owned[i] = idx
-      else:
-        tmp = idx[new]
-        idx = numpy.concatenate([ tmp, idx[~new] ])
-        owned[i] = idx[:tmp.size]
-        is1to1 = False
-      used[i] = idx
-      free[idx] = False
-    assert not free.any()
-    return used, used if is1to1 else owned
+  def __distribute( used ):
+    owned = numpy.empty_like( used )
+    touched = numpy.zeros_like( used[0] )
+    for i in used.sum( axis=1 ).argsort():
+      owned[i] = used[i] & ~touched
+      touched |= used[i]
+    assert touched.all()
+    return owned
 
   @cacheprop
   def global2local( self ):
@@ -309,7 +321,7 @@ class Map( Object ):
   def ownedmap( self ):
     if self.is1to1:
       return self
-    ownedmap = Map( self.comm, self.size, self.local2global_owned )
+    ownedmap = Map( self.comm, self.owned )
     assert ownedmap.is1to1
     return ownedmap
 

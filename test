@@ -15,9 +15,8 @@ def test( nprocs, size ):
     print '  proc %d:' % iproc, dofs
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
-  rowmap = libmatrix.Map( comm, size, rowdofmap ) # overlapping
-  print 'USED: ', rowmap.local2global
-  print 'OWNED: ', rowmap.local2global_owned
+  rowmap = libmatrix.Map( comm, rowdofmap, size ) # overlapping
+  print 'used:', rowmap.local2global
 
   block = numpy.array([[1,-1],[-1,1]])
   print 'block:'
