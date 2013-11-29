@@ -28,6 +28,12 @@ def cacheprop( f ):
     return cache[0]
   return property( wrapped )
 
+def first( iterable ):
+  for i, item in enumerate( iterable ):
+    if item:
+      return i
+  raise Exception, 'no nonzero value found'
+
 def bcast_token_template( template_var_arg ):
   def bcast_token( func ):
     int_token = _functions.index( func.func_name + '<number_t>' )
@@ -327,7 +333,7 @@ class Vector( Object ):
   def add_global( self, idx, data ):
     idx, = idx
     local = self.map.global2local[:,idx]
-    rank = ( local != -1 ).all( axis=1 ).nonzero()[0][0]
+    rank = first( ( local != -1 ).all( axis=1 ) )
     self.add( rank, [local[rank]], data )
 
   def toarray( self ):
@@ -392,7 +398,7 @@ class Matrix( Operator ):
     rowidx, colidx = idx
     rowlocal = self.rowmap.global2local[:,rowidx]
     collocal = self.colmap.global2local[:,colidx]
-    rank = ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ).nonzero()[0][0]
+    rank = first( ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ) )
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
   def complete( self, exporter ):
