@@ -479,3 +479,28 @@ class Graph( Object ):
     self.rowmap = rowmap
     self.colmap = colmap
     Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
+
+
+class Scalar( numpy.ndarray ):
+
+  def __new__( cls ):
+    return numpy.array( 0. ).view( cls )
+
+  def add_global( self, index, value ):
+    assert not index
+    self[...] += value
+
+  def complete( self ):
+    pass
+
+
+def Array( shape ):
+  if len( shape ) == 2:
+    return Matrix( shape )
+  if len( shape ) == 1:
+    return Vector( shape[0] )
+  assert not shape
+  return Scalar()
+
+
+# vim:shiftwidth=2:foldmethod=indent:foldnestmax=2
