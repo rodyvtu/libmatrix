@@ -26,7 +26,7 @@ def test( nprocs, size ):
 
   v_npy = numpy.arange(1,size+1) * 10
 
-  v = libmatrix.Vector( comm, rowmap )
+  v = libmatrix.Vector( rowmap )
 
   for i in range(size-1):
     dofs = numpy.arange(i,i+2)
@@ -50,7 +50,7 @@ def test( nprocs, size ):
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
   comm.toggle_stdout()
-  A = libmatrix.Matrix( comm, rowmap )
+  A = libmatrix.Matrix( rowmap )
   for i in range(size-1):
     idx = numpy.arange(i,i+2)
     print 'adding block to ', idx
@@ -72,7 +72,7 @@ def test( nprocs, size ):
   vectors = []
   numbers = []
   for i in range(size):
-    ei = libmatrix.Vector( comm, rowmap )
+    ei = libmatrix.Vector( rowmap )
     ei.add_global( idx=[[i]], data=[1] )
     ei.complete( export )
     print 'unit vector i=%d:' % i, ei.toarray()
@@ -88,7 +88,7 @@ def test( nprocs, size ):
 
   comm.toggle_stdout()
 
-  P = libmatrix.Precon( comm, A, 'ILUT' )
+  P = libmatrix.Precon( A, 'ILUT' )
   vv = A.solve( P, w, 'CG' )
 
   comm.toggle_stdout()

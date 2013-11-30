@@ -327,14 +327,15 @@ class Map( Object ):
 
   @cacheprop
   def export( self ):
-    return Export( self.comm, self, self.ownedmap )
+    return Export( self, self.ownedmap )
 
 
 class Vector( Object ):
 
-  def __init__( self, comm, map ):
-    self.size = map.size
+  def __init__( self, map ):
+    self.shape = map.size,
     assert isinstance( map, Map )
+    comm = map.comm
     self.map = map
     Object.__init__( self, comm, comm.vector_new( map.handle ) )
 
@@ -349,14 +350,14 @@ class Vector( Object ):
     self.add( rank, [local[rank]], data )
 
   def toarray( self ):
-    return self.comm.vector_getdata( self.handle, self.size, self.map.local2global )
+    return self.comm.vector_getdata( self.handle, self.map.size, self.map.local2global )
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
 
   def dot( self, other ):
     assert isinstance( other, Vector )
-    assert self.size == other.size
+    assert self.shape == other.shape
     return self.comm.vector_dot( self.handle, other.handle )
 
   def complete( self, export=None ):
@@ -378,29 +379,36 @@ class Operator( Object ):
 
 class Precon( Operator ):
 
-  def __init__( self, comm, matrix, precontype, preconparams=None ):
+  def __init__( self, matrix, precontype, preconparams=None ):
     assert isinstance( matrix, Operator )
+    comm = matrix.comm
     if not preconparams:
       preconparams = ParameterList( comm )
-    assert isinstance( preconparams, ParameterList )
+    else:
+      assert isinstance( preconparams, ParameterList )
+      assert preconparams.comm is comm
     myhandle = comm.precon_new( matrix.handle, _precons.index(precontype), preconparams.handle )
     Operator.__init__( self, comm, myhandle, reversed(matrix.shape) )
 
 
 class Matrix( Operator ):
 
-  def __init__( self, comm, init ):
+  def __init__( self, init ):
     if isinstance( init, Graph ):
       self.rowmap = init.rowmap
       self.colmap = init.colmap
+      comm = init.comm
       matrix_handle = comm.matrix_new_static( init.handle )
     else:
       if isinstance( init, Map ):
         self.rowmap = self.colmap = init
+        comm = self.rowmap.comm
       else:
         self.rowmap, self.colmap = init
         assert isinstance( self.rowmap, Map )
         assert isinstance( self.colmap, Map )
+        comm = self.rowmap.comm
+        assert self.colmap.comm is comm
       matrix_handle = comm.matrix_new_dynamic( self.rowmap.handle, self.colmap.handle )
     self.shape = self.rowmap.size, self.colmap.size
     Operator.__init__( self, comm, matrix_handle, self.shape )
@@ -431,8 +439,7 @@ class Matrix( Operator ):
   def matvec( self, vec ):
     assert isinstance( vec, Vector )
     assert vec.map == self.domainmap
-    assert self.shape[1] == vec.size
-    out = Vector( self.comm, self.rangemap )
+    out = Vector( self.rangemap )
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
@@ -441,18 +448,22 @@ class Matrix( Operator ):
     assert isinstance( rhs, Vector )
     if not params:
       params = ParameterList( self.comm )
-    assert isinstance( params, ParameterList )
-    assert self.shape[0] == rhs.size
-    lhs = Vector( self.comm, self.domainmap )
+    else:
+      assert isinstance( params, ParameterList )
+      assert params.comm is self.comm
+    assert self.rangemap == rhs.map # TODO check if this should be range or domain map
+    lhs = Vector( self.domainmap )
     self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( name ), symmetric, params.handle )
     return lhs
 
 
 class Export( Object ):
 
-  def __init__( self, comm, srcmap, dstmap ):
+  def __init__( self, srcmap, dstmap ):
     assert isinstance( srcmap, Map )
     assert isinstance( dstmap, Map )
+    comm = srcmap.comm
+    assert dstmap.comm is comm
     self.srcmap = srcmap
     self.dstmap = dstmap
     Object.__init__( self, comm, comm.export_new( srcmap.handle, dstmap.handle ) )
@@ -460,9 +471,11 @@ class Export( Object ):
 
 class Graph( Object ):
 
-  def __init__( self, comm, rowmap, colmap, rows ):
+  def __init__( self, rowmap, colmap, rows ):
     assert isinstance( rowmap, Map )
     assert isinstance( colmap, Map )
+    comm = rowmap.comm
+    assert colmap.comm is comm
     self.rowmap = rowmap
     self.colmap = colmap
     Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
