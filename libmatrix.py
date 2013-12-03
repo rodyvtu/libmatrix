@@ -21,12 +21,14 @@ token_t  = numpy.dtype( _info.pop( 'token_t'  ) )
 char_t   = numpy.dtype( 'str' )
 
 def cacheprop( f ):
-  return property(f)
-  cache = []
+  name = f.func_name
   def wrapped( self ):
-    if not cache:
-      cache.append( f(self) )
-    return cache[0]
+    try:
+      value = self.__dict__[ name ]
+    except KeyError:
+      value = f( self )
+      self.__dict__[ name ] = value
+    return value
   return property( wrapped )
 
 def where( array ):
