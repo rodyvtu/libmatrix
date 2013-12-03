@@ -88,13 +88,19 @@ def test( nprocs, size ):
 
   comm.toggle_stdout()
 
+  rhs = libmatrix.Vector( A.domainmap )
+  AA = libmatrix.Matrix( A.domainmap )
+  AA.add_global( idx=[[0],[0]], data=[[0]] )
+  AA.complete()
+  cons = AA.solve( precon=A, rhs=rhs, name='CG' )
+
   P = libmatrix.Precon( A, 'ILUT' )
-  vv = A.solve( P, w, 'CG' )
+  x = A.solve( precon=P, rhs=w, name='CG', cons=cons )
 
   comm.toggle_stdout()
 
-  print 'solve result:', vv.toarray()
-  print 'difference:', v.toarray() - vv.toarray()
+  print 'solve result:', x.toarray()
+  print 'difference:', v.toarray() - x.toarray()
 
 try:
   test( nprocs=2, size=10 )

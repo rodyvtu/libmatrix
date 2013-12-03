@@ -50,8 +50,6 @@ inline bool contains( T iterable, V value ) {
   return false;
 }
 
-class DescribableParams : public Teuchos::Describable, public Teuchos::ParameterList {};
-
 typedef double scalar_t;
 typedef int number_t;
 typedef int handle_t;
@@ -59,23 +57,66 @@ typedef int local_t;
 typedef long global_t;
 typedef uint8_t token_t;
 typedef bool bool_t;
+
 typedef Kokkos::DefaultNode::DefaultNodeType node_t;
-typedef Tpetra::Map<local_t, global_t, node_t> map_t;
-typedef Tpetra::Vector<scalar_t, local_t, global_t, node_t> vector_t;
-typedef Tpetra::Operator<scalar_t, local_t, global_t, node_t> operator_t;
-typedef Tpetra::MultiVector<scalar_t, local_t, global_t, node_t> multivector_t;
-typedef Tpetra::CrsMatrix<scalar_t, local_t, global_t, node_t> matrix_t;
-typedef Tpetra::CrsGraph<local_t, global_t, node_t> graph_t;
-typedef Belos::SolverManager<scalar_t, multivector_t, operator_t> solvermanager_t;
-typedef Belos::LinearProblem<scalar_t, multivector_t, operator_t> linearproblem_t;
-typedef Belos::SolverFactory<scalar_t, multivector_t, operator_t> solverfactory_t;
-typedef DescribableParams params_t;
-typedef Ifpack2::Preconditioner<scalar_t, local_t, global_t, node_t> precon_t;
+typedef Tpetra::Map<local_t,global_t,node_t> map_t;
+typedef Tpetra::Vector<scalar_t,local_t,global_t,node_t> vector_t;
+typedef Tpetra::Operator<scalar_t,local_t,global_t,node_t> operator_t;
+typedef Tpetra::MultiVector<scalar_t,local_t,global_t,node_t> multivector_t;
+typedef Tpetra::CrsMatrix<scalar_t,local_t,global_t,node_t> crsmatrix_t;
+typedef Tpetra::CrsGraph<local_t,global_t,node_t> crsgraph_t;
+typedef Tpetra::RowGraph<local_t,global_t,node_t> rowgraph_t;
+typedef Belos::SolverManager<scalar_t,multivector_t,operator_t> solvermanager_t;
+typedef Belos::SolverFactory<scalar_t,multivector_t,operator_t> solverfactory_t;
+typedef Ifpack2::Preconditioner<scalar_t,local_t,global_t,node_t> precon_t;
 typedef Ifpack2::Factory preconfactory_t;
 typedef Teuchos::ScalarTraits<scalar_t>::magnitudeType magnitude_t;
-typedef Tpetra::Export<local_t, global_t, node_t> export_t;
+typedef Tpetra::Export<local_t,global_t,node_t> export_t;
+
+class params_t : public Teuchos::Describable, public Teuchos::ParameterList {};
+
+class linearproblem_t : public Teuchos::Describable, public Belos::LinearProblem<scalar_t,multivector_t,operator_t> {
+public:
+  linearproblem_t( const Teuchos::RCP<const operator_t> &A, const Teuchos::RCP<multivector_t> &X, const Teuchos::RCP<const multivector_t> &B) :
+    Belos::LinearProblem<scalar_t,multivector_t,operator_t>( A, X, B ) {}
+};
+
 
 const global_t indexbase = 0;
+
+class SetZero : public operator_t {
+
+public:
+
+  SetZero( Teuchos::RCP<vector_t> selection ) : selection( selection ) {}
+
+  const Teuchos::RCP<const map_t> &getDomainMap() const {
+    return selection->getMap();
+  }
+
+  const Teuchos::RCP<const map_t> &getRangeMap() const {
+    return selection->getMap();
+  }
+
+  void apply(
+      const multivector_t &x,
+      multivector_t &y,
+      Teuchos::ETransp mode=Teuchos::NO_TRANS,
+      scalar_t alpha=Teuchos::ScalarTraits<scalar_t>::one(),
+      scalar_t beta=Teuchos::ScalarTraits<scalar_t>::zero() ) const {
+    // y = alpha C A C x + beta y
+    y.elementWiseMultiply( alpha, *selection, x, beta );
+
+  }
+
+  bool hasTransposeApply() const {
+    return true;
+  }
+
+private:
+  
+  const Teuchos::RCP<vector_t> selection;
+};
 
 
 class ObjectArray {
@@ -343,6 +384,22 @@ public:
   
     gatherv( data.get(), data.size() );
   }
+
+  void vector_fill() /* fill vector with scalar value
+    
+       -> broadcast HANDLE handle.vector
+       -> broadcast SCALAR value
+  */{
+  
+    struct { handle_t vector; } handle;
+    bcast( &handle );
+
+    scalar_t value;
+    bcast( &value );
+  
+    Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
+    vec->putScalar( value );
+  }
   
   void vector_dot() /* compute frobenius norm
      
@@ -392,6 +449,57 @@ public:
     release_object( handle.vector );
     set_object( handle.vector, completed_vector );
   }
+
+  void vector_or() /* logical OR vectors
+
+       -> broadcast HANDLE handle.{self,other}
+  */{
+
+    struct { handle_t self, other; } handle;
+    bcast( &handle );
+    Teuchos::RCP<vector_t> self = get_object<vector_t>( handle.self );
+    Teuchos::RCP<const vector_t> other = get_object<vector_t>( handle.other );
+    ASSERT( self->getMap() == other->getMap() );
+    Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
+    Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
+    for ( int i = 0; i < _self.size(); i++ ) {
+      if ( std::isnan( _self[i] ) ) {
+        _self[i] = _other[i];
+      }
+    }
+  }
+
+  void vector_axpy() /* logical OR vectors
+
+       -> broadcast HANDLE handle.{self,other}
+       -> broadcast SCALAR factor
+  */{
+
+    struct { handle_t self, other; } handle;
+    bcast( &handle );
+    scalar_t factor;
+    bcast( &factor );
+    Teuchos::RCP<vector_t> self = get_object<vector_t>( handle.self );
+    Teuchos::RCP<const vector_t> other = get_object<vector_t>( handle.other );
+    ASSERT( self->getMap() == other->getMap() );
+    Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
+    Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
+    for ( int i = 0; i < _self.size(); i++ ) {
+      _self[i] += factor * _other[i];
+    }
+  }
+
+  void vector_copy() /* logical OR vectors
+
+       -> broadcast HANDLE handle.{copy,orig}
+  */{
+
+    struct { handle_t copy, orig; } handle;
+    bcast( &handle );
+    Teuchos::RCP<const vector_t> orig = get_object<const vector_t>( handle.orig );
+    Teuchos::RCP<vector_t> copy = Teuchos::rcp<vector_t>( new vector_t( *orig ) );
+    set_object( handle.copy, copy );
+  }
   
   void graph_new() /* create new graph
      
@@ -417,7 +525,7 @@ public:
     Teuchos::ArrayRCP<local_t> indices( nindices );
     scatterv( indices.getRawPtr(), nindices );
   
-    Teuchos::RCP<graph_t> graph = Teuchos::rcp( new graph_t( rowmap, colmap, offsets, indices ) );
+    Teuchos::RCP<crsgraph_t> graph = Teuchos::rcp( new crsgraph_t( rowmap, colmap, offsets, indices ) );
     graph->fillComplete();
   
     set_object( handle.graph, graph );
@@ -431,11 +539,11 @@ public:
     struct { handle_t matrix, graph; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const graph_t> graph = get_object<const graph_t>( handle.graph );
+    Teuchos::RCP<const crsgraph_t> graph = get_object<const crsgraph_t>( handle.graph );
   
     out() << "creating matrix #" << handle.matrix << " from graph #" << handle.graph << std::endl;
   
-    Teuchos::RCP<matrix_t> matrix = Teuchos::rcp( new matrix_t( graph ) );
+    Teuchos::RCP<crsmatrix_t> matrix = Teuchos::rcp( new crsmatrix_t( graph ) );
   
     set_object( handle.matrix, matrix );
   }
@@ -453,7 +561,7 @@ public:
     Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
     Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
 
-    Teuchos::RCP<matrix_t> matrix = Teuchos::rcp( new matrix_t( rowmap, colmap, 0 ) );
+    Teuchos::RCP<crsmatrix_t> matrix = Teuchos::rcp( new crsmatrix_t( rowmap, colmap, 0 ) );
 
     set_object( handle.matrix, matrix );
   }
@@ -493,8 +601,8 @@ public:
     recv( colidx.getRawPtr(), nitems[1] );
     recv( data.getRawPtr(), nitems[0] * nitems[1] );
   
-    Teuchos::RCP<matrix_t> mat = get_object<matrix_t>( handle.matrix );
-    Teuchos::RCP<const graph_t> graph = mat->getCrsGraph();
+    Teuchos::RCP<crsmatrix_t> mat = get_object<crsmatrix_t>( handle.matrix );
+    Teuchos::RCP<const crsgraph_t> graph = mat->getCrsGraph();
   
     Teuchos::ArrayView<const local_t> current_icols;
     Teuchos::ArrayRCP<local_t> this_colidx( nitems[1] );
@@ -526,14 +634,14 @@ public:
     struct { handle_t matrix, exporter; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
+    Teuchos::RCP<const crsmatrix_t> matrix = get_object<const crsmatrix_t>( handle.matrix );
     Teuchos::RCP<const export_t> exporter = get_object<const export_t>( handle.exporter );
     Teuchos::RCP<const map_t> domainmap = exporter->getTargetMap();
     Teuchos::RCP<const map_t> rangemap = exporter->getTargetMap();
   
     out() << "completing matrix #" << handle.matrix << std::endl;
   
-    Teuchos::RCP<matrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
+    Teuchos::RCP<crsmatrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
     // defaults to "ADD" combine mode (reverseMode=false in Tpetra_CrsMatrix_def.hpp)
   
     release_object( handle.matrix );
@@ -548,7 +656,7 @@ public:
   
     struct { handle_t matrix; } handle;
     bcast( &handle );
-    Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
+    Teuchos::RCP<crsmatrix_t> matrix = get_object<crsmatrix_t>( handle.matrix );
   
     scalar_t norm = matrix->getFrobeniusNorm();
   
@@ -563,58 +671,34 @@ public:
     struct { handle_t matrix, rhs, lhs; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
+    Teuchos::RCP<crsmatrix_t> matrix = get_object<crsmatrix_t>( handle.matrix );
     Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
     Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
   
     matrix->apply( *rhs, *lhs );
   }
   
-  void matrix_solve() /* solve linear system
+  void vector_as_setzero_operator() /* create setzero from nan values
      
-       -> broadcast HANDLE handle.{matrix,precon,rhs,lhs,solvertype,solverparams}
-       -> broadcast BOOL symmetric
+       -> broadcast HANDLE handle.{setzero,vector}
   */{
   
-    struct { handle_t matrix, precon, rhs, lhs, solvertype, solverparams; } handle;
+    struct { handle_t setzero, vector; } handle;
     bcast( &handle );
   
-    bool_t symmetric;
-    bcast( &symmetric );
-  
-    Teuchos::RCP<matrix_t> matrix = get_object<matrix_t>( handle.matrix );
-    Teuchos::RCP<operator_t> precon = get_object<operator_t>( handle.precon );
-    Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
-    Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
-    Teuchos::RCP<params_t> solverparams = get_object<params_t>( handle.solverparams );
-  
-    solverfactory_t factory;
-    Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solvertype], solverparams );
-    Teuchos::RCP<linearproblem_t> problem = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
-  
-    if ( symmetric ) {
-      problem->setHermitian();
+    Teuchos::RCP<const vector_t> vector = get_object<const vector_t>( handle.vector );
+    Teuchos::RCP<vector_t> selection = Teuchos::rcp( new vector_t( vector->getMap() ) );
+
+    Teuchos::ArrayRCP<const scalar_t> _vector = vector->getData();
+    Teuchos::ArrayRCP<scalar_t> _selection = selection->getDataNonConst();
+    for ( int i = 0; i < _vector.size(); i++ ) {
+      _selection[i] = std::isnan( _vector[i] );
+      out() << "i=" << i << " selection=" << _selection[i] << std::endl;
     }
-    problem->setRightPrec( precon );
-  
-    // from the docs: Many of Belos' solvers require that this method has been
-    // called on the linear problem, before they can solve it.
-    problem->setProblem();
-  
-    // Tell the solver what problem you want to solve.
-    solver->setProblem( problem );
-  
-    // Attempt to solve the linear system.  result == Belos::Converged
-    // means that it was solved to the desired tolerance.  This call
-    // overwrites X with the computed approximate solution.
-    Belos::ReturnType result = solver->solve();
-  
-    // Ask the solver how many iterations the last solve() took.
-    const int numIters = solver->getNumIters();
-  
-    out() << "solver finished in " << numIters << " iterations with result " << result << std::endl;
+    Teuchos::RCP<SetZero> setzero = Teuchos::rcp( new SetZero(selection) );
+    set_object( handle.setzero, setzero );
   }
-  
+
   void precon_new() /* create new preconditioner
      
        -> broadcast HANDLE handle.{precon,matrix,precontype,preconparams}
@@ -623,7 +707,7 @@ public:
     struct { handle_t precon, matrix, precontype, preconparams; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const matrix_t> matrix = get_object<const matrix_t>( handle.matrix );
+    Teuchos::RCP<const crsmatrix_t> matrix = get_object<const crsmatrix_t>( handle.matrix );
     Teuchos::RCP<const params_t> preconparams = get_object<const params_t>( handle.preconparams );
    
     preconfactory_t factory;
@@ -653,6 +737,98 @@ public:
     Teuchos::RCP<export_t> exporter = Teuchos::rcp( new export_t( srcmap, dstmap ) );
   
     set_object( handle.exporter, exporter );
+  }
+
+  void linearproblem_new() /* create new linear problem
+     
+       -> broadcast HANDLE handle.{linprob,matrix,lhs0}
+  */{
+  
+    struct { handle_t linprob, matrix, lhs, rhs; } handle;
+    bcast( &handle );
+  
+    Teuchos::RCP<const operator_t> matrix = get_object<const operator_t>( handle.matrix );
+    Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
+    Teuchos::RCP<const vector_t> rhs = get_object<const vector_t>( handle.rhs );
+
+    Teuchos::RCP<linearproblem_t> linprob = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
+  
+    set_object( handle.linprob, linprob );
+  }
+
+  void linearproblem_set_hermitian() /* tell that operator is hermitian
+     
+       -> broadcast HANDLE handle.linprob
+  */{
+  
+    struct { handle_t linprob; } handle;
+    bcast( &handle );
+  
+    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
+    linprob->setHermitian();
+  }
+
+  void linearproblem_set_precon() /* set left preconditioner
+     
+       -> broadcast HANDLE handle.{linprob,prec}
+       -> broadcast BOOL right
+  */{
+  
+    struct { handle_t linprob, precon; } handle;
+    bcast( &handle );
+
+    bool_t right;
+    bcast( &right );
+  
+    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
+    Teuchos::RCP<const operator_t> precon = get_object<const operator_t>( handle.precon );
+    ((*linprob).*( right ? &linearproblem_t::setRightPrec : &linearproblem_t::setLeftPrec ))( precon );
+  }
+
+  void linearproblem_solve() /* solve system
+     
+       -> broadcast HANDLE handle.{linprob,solverparams,solvertype}
+  */{
+  
+    struct { handle_t linprob, solverparams, solvertype; } handle;
+    bcast( &handle );
+  
+    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
+    Teuchos::RCP<params_t> solverparams = get_object<params_t>( handle.solverparams );
+
+    solverfactory_t factory;
+    Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solvertype], solverparams );
+  
+    // called on the linear problem, before they can solve it.
+    linprob->setProblem();
+  
+    // Tell the solver what problem you want to solve.
+    solver->setProblem( linprob );
+  
+    // Attempt to solve the linear system.  result == Belos::Converged
+    // means that it was solved to the desired tolerance.  This call
+    // overwrites X with the computed approximate solution.
+    Belos::ReturnType result = solver->solve();
+
+    Teuchos::RCP<const crsmatrix_t> crsmatrix = Teuchos::rcp_dynamic_cast<const crsmatrix_t>( linprob->getOperator() );
+    if ( ! crsmatrix.is_null() ) {
+      Teuchos::RCP<const rowgraph_t> graph = crsmatrix->getGraph();
+      Teuchos::RCP<multivector_t> mlhs = linprob->getLHS();
+      for ( int ivec = 0; ivec < mlhs->getNumVectors(); ivec++ ) {
+        Teuchos::ArrayRCP<scalar_t> _lhs = mlhs->getDataNonConst( ivec );
+        for ( int irow = 0; irow < _lhs.size(); irow++ ) {
+          if ( graph->getNumEntriesInLocalRow( irow ) == 0 ) {
+            out() << "row " << irow << " is empty" << std::endl;
+            _lhs[irow] = NAN;
+          }
+        }
+      }
+    }
+  
+    // Ask the solver how many iterations the last solve() took.
+    const int numIters = solver->getNumIters();
+  
+    out() << "solver finished in " << numIters << " iterations with result " << result << std::endl;
   }
 
   void toggle_stdout() /* switch std output on/off

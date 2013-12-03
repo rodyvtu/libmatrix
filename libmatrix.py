@@ -21,6 +21,7 @@ token_t  = numpy.dtype( _info.pop( 'token_t'  ) )
 char_t   = numpy.dtype( 'str' )
 
 def cacheprop( f ):
+  return property(f)
   cache = []
   def wrapped( self ):
     if not cache:
@@ -134,6 +135,17 @@ class LibMatrix( InterComm ):
     return vec_handle
 
   @bcast_token
+  def vector_copy( self, orig_handle ):
+    copy_handle = self.claim_handle()
+    self.bcast( [ copy_handle, orig_handle ], handle_t )
+    return copy_handle
+
+  @bcast_token
+  def vector_fill( self, vec_handle, value ):
+    self.bcast( vec_handle, handle_t )
+    self.bcast( value, scalar_t )
+
+  @bcast_token
   def vector_add_block( self, handle, rank, idx, data ):
     n = len(idx)
     assert len(data) == n
@@ -166,6 +178,21 @@ class LibMatrix( InterComm ):
   @bcast_token
   def vector_complete( self, vector_handle, export_handle ):
     self.bcast( [ vector_handle, export_handle ], handle_t )
+
+  @bcast_token
+  def vector_or( self, self_handle, other_handle ):
+    self.bcast( [ self_handle, other_handle ], handle_t )
+
+  @bcast_token
+  def vector_axpy( self, self_handle, other_handle, factor ):
+    self.bcast( [ self_handle, other_handle ], handle_t )
+    self.bcast( factor, scalar_t )
+
+  @bcast_token
+  def vector_as_setzero_operator( self, vector_handle ):
+    setzero_handle = self.claim_handle()
+    self.bcast( [ setzero_handle, vector_handle ], handle_t )
+    return setzero_handle
 
   @bcast_token
   def matrix_new_static( self, graph_handle ):
@@ -221,9 +248,23 @@ class LibMatrix( InterComm ):
     return graph_handle
 
   @bcast_token
-  def matrix_solve( self, matrix_handle, precon_handle, rhs_handle, lhs_handle, solvertype_handle, symmetric, solverparams_handle ):
-    self.bcast( [ matrix_handle, precon_handle, rhs_handle, lhs_handle, solvertype_handle, solverparams_handle ], handle_t )
-    self.bcast( symmetric, bool_t )
+  def linearproblem_new( self, matrix_handle, lhs_handle, rhs_handle ):
+    linprob_handle = self.claim_handle()
+    self.bcast( [ linprob_handle, matrix_handle, lhs_handle, rhs_handle ], handle_t )
+    return linprob_handle
+
+  @bcast_token
+  def linearproblem_set_hermitian( self, linprob_handle ):
+    self.bcast( linprob_handle, handle_t )
+
+  @bcast_token
+  def linearproblem_set_precon( self, linprob_handle, precon_handle, right ):
+    self.bcast( [ linprob_handle, precon_handle ], handle_t )
+    self.bcast( right, bool_t )
+
+  @bcast_token
+  def linearproblem_solve( self, linprob_handle, solverparams_handle, solvername_handle ):
+    self.bcast( [ linprob_handle, solverparams_handle, solvername_handle ], handle_t )
 
   @bcast_token
   def toggle_stdout( self ):
@@ -332,12 +373,18 @@ class Map( Object ):
 
 class Vector( Object ):
 
-  def __init__( self, map ):
-    self.shape = map.size,
-    assert isinstance( map, Map )
-    comm = map.comm
-    self.map = map
-    Object.__init__( self, comm, comm.vector_new( map.handle ) )
+  def __init__( self, init ):
+    if isinstance( init, Map ):
+      self.shape = init.size,
+      self.map = init
+      myhandle = init.comm.vector_new( self.map.handle )
+    elif isinstance( init, Vector ):
+      self.shape = init.shape
+      self.map = init.map
+      myhandle = init.comm.vector_copy( init.handle )
+    else:
+      raise Exception, 'cannot construct vector from %r' % init
+    Object.__init__( self, init.comm, myhandle )
 
   def add( self, rank, idx, data ):
     idx, = idx
@@ -368,6 +415,46 @@ class Vector( Object ):
       export = self.map.export
     self.comm.vector_complete( self.handle, export.handle )
     self.map = export.dstmap
+
+  def fill( self, value ):
+    self.comm.vector_fill( self.handle, value )
+
+  def __or__( self, other ):
+    return Vector(self).__ior__( other )
+
+  def __ior__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_or( self.handle, other.handle )
+    return self
+
+  def __sub__( self, other ):
+    return Vector(self).__isub__( other )
+
+  def __isub__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_axpy( self.handle, other.handle, -1 )
+    return self
+
+  def __add__( self, other ):
+    return Vector(self).__iadd__( other )
+
+  def __iadd__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_axpy( self.handle, other.handle, 1 )
+    return self
+
+  def asme( self, other ):
+    if isinstance( other, (int,float) ):
+      value = other
+      other = Vector( self.map )
+      other.fill( value )
+    assert isinstance( other, Vector )
+    assert other.map == self.map
+    return other
+
+  def as_setzero_operator( self ):
+    handle = self.comm.vector_as_setzero_operator( self.handle )
+    return Operator( self.comm, handle, self.shape*2 )
 
 
 class Operator( Object ):
@@ -425,11 +512,10 @@ class Matrix( Operator ):
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
   def complete( self, export=None ):
-    if export:
-      assert isinstance( export, Export )
-      assert self.rowmap == export.srcmap
-    else:
+    if not export:
       export = self.rowmap.export
+    assert isinstance( export, Export )
+    assert self.rowmap == export.srcmap
     self.comm.matrix_complete( self.handle, export.handle )
     self.domainmap = self.rangemap = export.dstmap
 
@@ -443,18 +529,62 @@ class Matrix( Operator ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, precon, rhs, name='GMRES', symmetric=False, params=None ):
-    assert isinstance( precon, Operator )
+  def solve( self, rhs, lhs=None, precon=None, name='GMRES', symmetric=False, params=None, cons=None ):
+    linprob = LinearProblem( self, rhs, lhs )
+    if symmetric:
+      linprob.set_hermitian()
+    if cons:
+      assert isinstance( cons, Vector )
+      assert cons.map == self.domainmap
+      setzero = cons.as_setzero_operator()
+      linprob.set_precon( setzero, right=False )
+      linprob.set_precon( setzero, right=True )
+      rhs -= self.matvec( cons | 0 )
+    lhs = linprob.solve( name, params )
+    if cons:
+      lhs = cons | lhs
+    return lhs
+
+
+class LinearProblem( Object ):
+
+  def __init__( self, matrix, rhs, lhs=None ):
+    assert isinstance( matrix, Operator )
+    ndofs = matrix.shape[0]
+    assert matrix.shape[1] == ndofs
+    comm = matrix.comm
+    if not lhs:
+      lhs = Vector( matrix.domainmap )
+    assert isinstance( lhs, Vector )
+    assert lhs.map == matrix.domainmap
+    assert lhs.shape[0] == ndofs
+    assert lhs.comm == comm
     assert isinstance( rhs, Vector )
+    assert rhs.map == matrix.rangemap
+    assert rhs.shape[0] == ndofs
+    assert rhs.comm == comm
+    myhandle = comm.linearproblem_new( matrix.handle, lhs.handle, rhs.handle )
+    Object.__init__( self, comm, myhandle )
+    self.matrix = matrix
+    self.lhs = lhs
+    self.rhs = rhs
+
+  def set_hermitian( self ):
+    self.comm.linearproblem_set_hermitian( self.handle )
+
+  def set_precon( self, precon, right=False ):
+    assert isinstance( precon, Operator )
+    assert precon.shape == self.matrix.shape
+    self.comm.linearproblem_set_precon( self.handle, precon.handle, right )
+
+  def solve( self, name='GMRES', params=None ):
     if not params:
       params = ParameterList( self.comm )
-    else:
-      assert isinstance( params, ParameterList )
-      assert params.comm is self.comm
-    assert self.rangemap == rhs.map # TODO check if this should be range or domain map
-    lhs = Vector( self.domainmap )
-    self.comm.matrix_solve( self.handle, precon.handle, rhs.handle, lhs.handle, _solvers.index( name ), symmetric, params.handle )
-    return lhs
+    assert isinstance( params, ParameterList )
+    assert params.comm is self.comm
+    solver_handle = _solvers.index( name )
+    self.comm.linearproblem_solve( self.handle, params.handle, solver_handle )
+    return self.lhs
 
 
 class Export( Object ):
