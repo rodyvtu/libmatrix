@@ -555,7 +555,7 @@ class Matrix( Operator ):
     if precon:
       linprob.add_precon( precon )
     if not name:
-      name = 'CS' if symmetric else 'GMRES'
+      name = 'CG' if symmetric else 'GMRES'
     lhs = linprob.solve( name, params )
     if cons:
       lhs = cons | lhs
