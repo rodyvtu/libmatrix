@@ -95,7 +95,7 @@ def test( nprocs, size ):
   cons.nan_from_supp( AA )
 
   P = libmatrix.Precon( A, 'ILUT' )
-  x = A.solve( precon=P, rhs=w, name='CG', constrain=cons )
+  x = A.solve( precon=P, rhs=w, name='CG', constrain=cons, symmetric=True )
 
   print 'solve result:', x.toarray()
   print 'difference:', v.toarray() - x.toarray()
