@@ -15,6 +15,7 @@ def test( nprocs, size ):
     print '  proc %d:' % iproc, dofs
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
+  comm.set_verbosity( 1 )
   rowmap = libmatrix.Map( comm, rowdofmap, size ) # overlapping
   print 'used:', rowmap.local2global
 
@@ -49,13 +50,11 @@ def test( nprocs, size ):
   print 'resulting norm:', norm
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
-  comm.toggle_stdout()
   A = libmatrix.Matrix( rowmap )
   for i in range(size-1):
     idx = numpy.arange(i,i+2)
     print 'adding block to ', idx
     A.add_global( idx=[idx,idx], data=block )
-  comm.toggle_stdout()
   A.complete( export )
 
   A_npy = numpy.eye(size,size) * 2 - numpy.eye(size,size,1) - numpy.eye(size,size,-1)
@@ -86,8 +85,6 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
-  comm.toggle_stdout()
-
   rhs = libmatrix.Vector( A.domainmap )
   AA = libmatrix.Matrix( A.domainmap )
   AA.add_global( idx=[[0],[0]], data=[[0]] )
@@ -96,8 +93,6 @@ def test( nprocs, size ):
 
   P = libmatrix.Precon( A, 'ILUT' )
   x = A.solve( precon=P, rhs=w, name='CG', cons=cons )
-
-  comm.toggle_stdout()
 
   print 'solve result:', x.toarray()
   print 'difference:', v.toarray() - x.toarray()

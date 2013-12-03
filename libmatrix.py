@@ -269,8 +269,8 @@ class LibMatrix( InterComm ):
     self.bcast( [ linprob_handle, solverparams_handle, solvername_handle ], handle_t )
 
   @bcast_token
-  def toggle_stdout( self ):
-    pass
+  def set_verbosity( self, level ):
+    self.bcast( level, number_t )
 
   def __del__( self ):
     self.bcast( -1, token_t )

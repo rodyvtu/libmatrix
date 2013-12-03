@@ -10,7 +10,7 @@ FUNCTIONS := \
 	matrix_new_static matrix_new_dynamic matrix_add_block matrix_complete matrix_norm matrix_apply \
 	vector_new vector_fill vector_add_block vector_getdata vector_dot vector_norm vector_complete vector_or vector_copy vector_axpy vector_as_setzero_operator \
 	linearproblem_new linearproblem_set_hermitian linearproblem_set_precon linearproblem_solve \
-	map_new graph_new precon_new export_new release toggle_stdout
+	map_new graph_new precon_new export_new release set_verbosity
 
 null :=
 space := $(null) #
