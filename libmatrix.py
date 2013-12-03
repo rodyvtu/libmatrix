@@ -158,13 +158,12 @@ class LibMatrix( InterComm ):
     self.send( rank, data, scalar_t )
 
   @bcast_token
-  def vector_getdata( self, vec_handle, size, local2global ):
+  def vector_getdata( self, vec_handle, local2global ):
     self.bcast( vec_handle, handle_t )
-    array = numpy.zeros( size ) # TODO fix length
     lengths = map( len, local2global )
+    array = numpy.empty( sum(lengths) )
     local_arrays = self.gatherv( lengths, scalar_t )
-    for idx, local_array in zip( local2global, local_arrays ):
-      array[idx] += local_array
+    map( array.__setitem__, local2global, local_arrays )
     return array
 
   @bcast_token
@@ -399,7 +398,8 @@ class Vector( Object ):
     self.add( rank, [local[rank]], data )
 
   def toarray( self ):
-    return self.comm.vector_getdata( self.handle, self.map.size, self.map.local2global )
+    assert self.map.is1to1
+    return self.comm.vector_getdata( self.handle, self.map.local2global )
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
