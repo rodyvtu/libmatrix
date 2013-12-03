@@ -541,24 +541,24 @@ class Matrix( Operator ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, rhs, lhs=None, precon=None, name=None, symmetric=False, params=None, cons=None ):
+  def solve( self, rhs, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
     linprob = LinearProblem( self, rhs, lhs )
     if symmetric:
       linprob.set_hermitian()
-    if cons:
-      assert isinstance( cons, Vector )
-      assert cons.map == self.domainmap
-      setzero = cons.as_setzero_operator()
+    if constrain:
+      assert isinstance( constrain, Vector )
+      assert constrain.map == self.domainmap
+      setzero = constrain.as_setzero_operator()
       linprob.add_precon( setzero, right=True )
       linprob.add_precon( setzero, right=False )
-      rhs -= self.matvec( cons | 0 )
+      rhs -= self.matvec( constrain | 0 )
     if precon:
       linprob.add_precon( precon )
     if not name:
       name = 'CG' if symmetric else 'GMRES'
     lhs = linprob.solve( name, params )
-    if cons:
-      lhs = cons | lhs
+    if constrain:
+      lhs = constrain | lhs
     return lhs
 
 
