@@ -259,9 +259,12 @@ class LibMatrix( InterComm ):
     self.bcast( linprob_handle, handle_t )
 
   @bcast_token
-  def linearproblem_set_precon( self, linprob_handle, precon_handle, right ):
+  def linearproblem_add_left_precon( self, linprob_handle, precon_handle ):
     self.bcast( [ linprob_handle, precon_handle ], handle_t )
-    self.bcast( right, bool_t )
+
+  @bcast_token
+  def linearproblem_add_right_precon( self, linprob_handle, precon_handle ):
+    self.bcast( [ linprob_handle, precon_handle ], handle_t )
 
   @bcast_token
   def linearproblem_solve( self, linprob_handle, solverparams_handle, solvername_handle ):
@@ -539,8 +542,8 @@ class Matrix( Operator ):
       assert isinstance( cons, Vector )
       assert cons.map == self.domainmap
       setzero = cons.as_setzero_operator()
-      linprob.set_precon( setzero, right=False )
-      linprob.set_precon( setzero, right=True )
+      linprob.add_precon( setzero, right=True )
+      linprob.add_precon( setzero, right=False )
       rhs -= self.matvec( cons | 0 )
     lhs = linprob.solve( name, params )
     if cons:
@@ -574,10 +577,13 @@ class LinearProblem( Object ):
   def set_hermitian( self ):
     self.comm.linearproblem_set_hermitian( self.handle )
 
-  def set_precon( self, precon, right=False ):
+  def add_precon( self, precon, right=False ):
     assert isinstance( precon, Operator )
     assert precon.shape == self.matrix.shape
-    self.comm.linearproblem_set_precon( self.handle, precon.handle, right )
+    if right:
+      self.comm.linearproblem_add_right_precon( self.handle, precon.handle )
+    else:
+      self.comm.linearproblem_add_left_precon( self.handle, precon.handle )
 
   def solve( self, name='GMRES', params=None ):
     if not params:

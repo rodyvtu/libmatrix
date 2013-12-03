@@ -805,21 +805,30 @@ private:
     linprob->setHermitian();
   }
 
-  void linearproblem_set_precon() /* set left preconditioner
+  void linearproblem_add_left_precon() /* add left preconditioner
      
        -> broadcast HANDLE handle.{linprob,prec}
-       -> broadcast BOOL right
   */{
   
     struct { handle_t linprob, precon; } handle;
     bcast( &handle );
 
-    bool_t right;
-    bcast( &right );
-  
     Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
     Teuchos::RCP<const operator_t> precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
-    ((*linprob).*( right ? &linearproblem_t::setRightPrec : &linearproblem_t::setLeftPrec ))( precon );
+    linprob->setLeftPrec( precon );
+  }
+
+  void linearproblem_add_right_precon() /* add right preconditioner
+     
+       -> broadcast HANDLE handle.{linprob,prec}
+  */{
+  
+    struct { handle_t linprob, precon; } handle;
+    bcast( &handle );
+
+    Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
+    Teuchos::RCP<const operator_t> precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
+    linprob->setRightPrec( precon );
   }
 
   void linearproblem_solve() /* solve system
