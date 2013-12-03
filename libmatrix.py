@@ -3,7 +3,7 @@ from mpi import InterComm
 
 exe, pyext = __file__.rsplit( '.', 1 )
 exe += '.mpi'
-info, dummy = subprocess.Popen( [ exe, 'info' ], stdout=subprocess.PIPE ).communicate()
+info, dummy = subprocess.Popen( exe, stdout=subprocess.PIPE ).communicate()
 
 _info  = dict( line.split( ': ', 1 ) for line in info.splitlines() )
 _functions = _info.pop('functions').split(', ')
