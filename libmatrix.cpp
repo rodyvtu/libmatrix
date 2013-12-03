@@ -769,16 +769,16 @@ private:
     matrix->apply( *rhs, *lhs );
   }
   
-  void matrix_supp_to_nan() /* set vector items to nan for non suppored rows
+  void vector_nan_from_supp() /* set vector items to nan for non suppored rows
      
-       -> broadcast HANDLE handle.{matrix,vector}
+       -> broadcast HANDLE handle.{vector,matrix}
   */{
   
-    struct { handle_t matrix, vector; } handle;
+    struct { handle_t vector, matrix; } handle;
     bcast( &handle );
   
-    auto matrix = objects.get<crsmatrix_t>( handle.matrix, out(DEBUG) );
     auto vector = objects.get<vector_t>( handle.vector, out(DEBUG) );
+    auto matrix = objects.get<const crsmatrix_t>( handle.matrix, out(DEBUG) );
     auto graph = matrix->getGraph();
     int irow = 0;
     for ( auto &vector_i : vector->getDataNonConst() ) {

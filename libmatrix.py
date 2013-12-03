@@ -239,8 +239,8 @@ class LibMatrix( InterComm ):
     self.bcast( [ matrix_handle, vec_handle, out_handle ], handle_t )
 
   @bcast_token
-  def matrix_supp_to_nan( self, matrix_handle, vector_handle ):
-    self.bcast( [ matrix_handle, vector_handle ], handle_t )
+  def vector_nan_from_supp( self, vector_handle, matrix_handle ):
+    self.bcast( [ vector_handle, matrix_handle ], handle_t )
 
   @bcast_token
   def graph_new( self, rowmap_handle, colmap_handle, rows ):
@@ -465,6 +465,9 @@ class Vector( Object ):
     handle = self.comm.vector_as_setzero_operator( self.handle )
     return Operator( self.comm, handle, self.shape*2 )
 
+  def nan_from_supp( self, matrix ):
+    self.comm.vector_nan_from_supp( self.handle, matrix.handle )
+
 
 class Operator( Object ):
 
@@ -555,9 +558,6 @@ class Matrix( Operator ):
     if cons:
       lhs = cons | lhs
     return lhs
-
-  def supp_to_nan( self, vec ):
-    self.comm.matrix_supp_to_nan( self.handle, vec.handle )
 
 
 class LinearProblem( Object ):
