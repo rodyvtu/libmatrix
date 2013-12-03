@@ -19,7 +19,7 @@
 
 Teuchos::oblackholestream blackHole;
 
-enum verbosity_t { DEBUG, INFO, WARNING, ERROR };
+enum verbosity_t { ERROR, WARNING, INFO, DEBUG };
 
 auto supportedPreconNames = Teuchos::tuple(
   std::string( "ILUT" ),
@@ -890,16 +890,16 @@ private:
 
       -> NUMBER level
   */{
-    bcast( &min_verbosity_level );
+    bcast( &max_verbosity_level );
   }
 
   inline std::ostream& out( verbosity_t level ) {
-    return level >= min_verbosity_level ? std::cout << '[' << (myrank+1) << '/' << nprocs << "] " : blackHole;
+    return level <= max_verbosity_level ? std::cout << '[' << (myrank+1) << '/' << nprocs << "] " : blackHole;
   }
 
 private:
 
-  int min_verbosity_level = WARNING;
+  int max_verbosity_level = WARNING;
   ObjectArray objects;
 
 };
