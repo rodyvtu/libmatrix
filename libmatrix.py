@@ -541,7 +541,7 @@ class Matrix( Operator ):
     self.comm.matrix_apply( self.handle, vec.handle, out.handle )
     return out
 
-  def solve( self, rhs, lhs=None, precon=None, name='GMRES', symmetric=False, params=None, cons=None ):
+  def solve( self, rhs, lhs=None, precon=None, name=None, symmetric=False, params=None, cons=None ):
     linprob = LinearProblem( self, rhs, lhs )
     if symmetric:
       linprob.set_hermitian()
@@ -554,6 +554,8 @@ class Matrix( Operator ):
       rhs -= self.matvec( cons | 0 )
     if precon:
       linprob.add_precon( precon )
+    if not name:
+      name = 'CS' if symmetric else 'GMRES'
     lhs = linprob.solve( name, params )
     if cons:
       lhs = cons | lhs
