@@ -35,7 +35,7 @@ template <class T>
 void print_all( const char name[], T iterable ) {
   std::cout << name;
   char sep[] = ": ";
-  for ( auto item : iterable ) {
+  for ( auto const &item : iterable ) {
     std::cout << sep << item;
     sep[0] = ',';
   }
@@ -44,7 +44,7 @@ void print_all( const char name[], T iterable ) {
 
 template <class T, class V>
 inline bool contains( T iterable, V value ) {
-  for ( auto item : iterable ) {
+  for ( auto const &item : iterable ) {
     if ( item == value ) {
       return true;
     }
@@ -442,16 +442,18 @@ private:
   
     out(INFO) << "ivec = " << handle.vector << ", nitems = " << nitems << std::endl;
   
-    Teuchos::ArrayRCP<local_t> idx( nitems );
+    Teuchos::ArrayRCP<local_t> indices( nitems );
     Teuchos::ArrayRCP<scalar_t> data( nitems );
   
-    recv( idx.getRawPtr(), nitems );
+    recv( indices.getRawPtr(), nitems );
     recv( data.getRawPtr(), nitems );
   
     auto vec = objects.get<vector_t>( handle.vector, out(DEBUG) );
-    for ( int i = 0; i < nitems; i++ ) {
-      out(INFO) << idx[i] << " : " << data[i] << std::endl;
-      vec->sumIntoLocalValue( idx[i], data[i] );
+    auto value = data.begin();
+    for ( auto const &idx : indices ) {
+      out(INFO) << idx << " : " << *value << std::endl;
+      vec->sumIntoLocalValue( idx, *value );
+      value++;
     }
   
   }
@@ -467,7 +469,7 @@ private:
   
     auto vec = objects.get<vector_t>( handle.vector, out(DEBUG) );
   
-    Teuchos::ArrayRCP<const scalar_t> data = vec->getData();
+    auto data = vec->getData();
   
     gatherv( data.get(), data.size() );
   }
@@ -546,12 +548,12 @@ private:
     auto self = objects.get<vector_t>( handle.self, out(DEBUG) );
     auto other = objects.get<vector_t>( handle.other, out(DEBUG) );
     ASSERT( self->getMap() == other->getMap() );
-    Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
-    Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
-    for ( int i = 0; i < _self.size(); i++ ) {
-      if ( std::isnan( _self[i] ) ) {
-        _self[i] = _other[i];
+    auto other_i = other->getData().begin();
+    for ( auto &self_i : self->getDataNonConst() ) {
+      if ( std::isnan( self_i ) ) {
+        self_i = *other_i;
       }
+      other_i++;
     }
   }
 
@@ -568,10 +570,10 @@ private:
     auto self = objects.get<vector_t>( handle.self, out(DEBUG) );
     auto other = objects.get<vector_t>( handle.other, out(DEBUG) );
     ASSERT( self->getMap() == other->getMap() );
-    Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
-    Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
-    for ( int i = 0; i < _self.size(); i++ ) {
-      _self[i] += factor * _other[i];
+    auto other_i = other->getData().begin();
+    for ( auto &self_i : self->getDataNonConst() ) {
+      self_i += factor * (*other_i);
+      other_i++;
     }
   }
 
@@ -694,10 +696,10 @@ private:
     Teuchos::ArrayRCP<local_t> this_colidx( nitems[1] );
     Teuchos::ArrayRCP<scalar_t> this_data( nitems[1] );
     auto value = data.begin();
-    for ( auto irow : rowidx ) {
+    for ( auto const &irow : rowidx ) {
       int nnew = 0, nold = 0;
       graph->getLocalRowView( irow, current_icols );
-      for ( auto icol : colidx ) {
+      for ( auto const &icol : colidx ) {
         if ( *value != 0 ) {
           int i = contains( current_icols, icol ) ? (nold++) : nitems[1] - (++nnew);
           this_colidx[i] = icol;
@@ -778,11 +780,10 @@ private:
     auto vector = objects.get<const vector_t>( handle.vector, out(DEBUG) );
     auto selection = Teuchos::rcp( new vector_t( vector->getMap() ) );
 
-    Teuchos::ArrayRCP<const scalar_t> _vector = vector->getData();
-    Teuchos::ArrayRCP<scalar_t> _selection = selection->getDataNonConst();
-    for ( int i = 0; i < _vector.size(); i++ ) {
-      _selection[i] = std::isnan( _vector[i] );
-      out(INFO) << "i=" << i << " selection=" << _selection[i] << std::endl;
+    auto vector_i = vector->getData().begin();
+    for ( auto &selection_i : selection->getDataNonConst() ) {
+      selection_i = std::isnan( *vector_i );
+      vector_i++;
     }
     auto setzero = Teuchos::rcp( new SetZero(selection) );
     objects.set( handle.setzero, setzero, out(DEBUG) );
@@ -929,7 +930,7 @@ private:
       auto graph = crsmatrix->getGraph();
       auto mlhs = linprob->getLHS();
       for ( int ivec = 0; ivec < mlhs->getNumVectors(); ivec++ ) {
-        Teuchos::ArrayRCP<scalar_t> _lhs = mlhs->getDataNonConst( ivec );
+        auto _lhs = mlhs->getDataNonConst( ivec );
         for ( int irow = 0; irow < _lhs.size(); irow++ ) {
           if ( graph->getNumEntriesInLocalRow( irow ) == 0 ) {
             out(INFO) << "row " << irow << " is empty" << std::endl;
