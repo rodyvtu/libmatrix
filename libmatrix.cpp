@@ -143,6 +143,14 @@ public:
     }
   }
 
+  inline void reset( handle_t handle, Teuchos::RCP<Teuchos::Describable> object, std::ostream &out ) {
+    if ( out != blackHole ) {
+      out << "reset #" << handle << ": " << object->description() << std::endl;
+    }
+    ASSERT( handle < objects.size() );
+    objects[handle] = object;
+  }
+
   template <class T>
   inline Teuchos::RCP<T> get( handle_t handle, std::ostream &out ) {
     Teuchos::RCP<Teuchos::Describable> object = objects[handle];
@@ -152,7 +160,10 @@ public:
     return Teuchos::rcp_dynamic_cast<T>( object, true );
   }
 
-  inline void release( handle_t handle ) {
+  inline void release( handle_t handle, std::ostream &out ) {
+    if ( out != blackHole ) {
+      out << "release #" << handle << std::endl;
+    }
     objects[handle] = Teuchos::RCP<Teuchos::Describable>();
   }
 
@@ -319,7 +330,7 @@ private:
   
     handle_t handle;
     bcast( &handle );
-    objects.release( handle );
+    objects.release( handle, out(DEBUG) );
   }
   
   void map_new() /* create new map
@@ -483,8 +494,7 @@ private:
     Teuchos::RCP<vector_t> completed_vector = Teuchos::rcp( new vector_t( map ) );
     completed_vector->doExport( *vector, *exporter, Tpetra::ADD );
 
-    objects.release( handle.vector );
-    objects.set( handle.vector, completed_vector, out(DEBUG) );
+    objects.reset( handle.vector, completed_vector, out(DEBUG) );
   }
 
   void vector_or() /* logical OR vectors
@@ -681,8 +691,7 @@ private:
     Teuchos::RCP<crsmatrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
     // defaults to "ADD" combine mode (reverseMode=false in Tpetra_CrsMatrix_def.hpp)
   
-    objects.release( handle.matrix );
-    objects.set( handle.matrix, completed_matrix, out(DEBUG) );
+    objects.reset( handle.matrix, completed_matrix, out(DEBUG) );
   }
   
   void matrix_norm() /* compute frobenius norm
