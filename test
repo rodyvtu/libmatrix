@@ -15,7 +15,7 @@ def test( nprocs, size ):
     print '  proc %d:' % iproc, dofs
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
-  comm.set_verbosity( 2 )
+  comm.set_verbosity( 1 )
   rowmap = libmatrix.Map( comm, rowdofmap, size ) # overlapping
   print 'used:', rowmap.local2global
 
@@ -74,7 +74,7 @@ def test( nprocs, size ):
     ei = libmatrix.Vector( rowmap )
     ei.add_global( idx=[[i]], data=[1] )
     ei.complete( export )
-    print 'unit vector i=%d:' % i, ei.toarray()
+    #print 'unit vector i=%d:' % i, ei.toarray()
     vectors.append( A.matvec( ei ).toarray() )
     numbers.append( v.dot( ei ) )
 
@@ -100,6 +100,6 @@ def test( nprocs, size ):
   print 'difference:', v.toarray() - x.toarray()
 
 try:
-  test( nprocs=2, size=10 )
+  test( nprocs=4, size=100 )
 except:
   traceback.print_exc()

@@ -90,12 +90,12 @@ const std::string _funcnames[] = { FUNCNAMES };
 const size_t nfuncs = sizeof(_funcnames) / sizeof(_funcnames[0]);
 const std::vector<std::string> funcnames( _funcnames, _funcnames + nfuncs );
 
-
 class SetZero : public operator_t {
 
 public:
 
-  SetZero( Teuchos::RCP<vector_t> selection ) : selection( selection ) {}
+  SetZero( Teuchos::RCP<const vector_t> selection )
+    : selection( selection ) {}
 
   const Teuchos::RCP<const map_t> &getDomainMap() const {
     return selection->getMap();
@@ -111,7 +111,7 @@ public:
       Teuchos::ETransp mode=Teuchos::NO_TRANS,
       scalar_t alpha=Teuchos::ScalarTraits<scalar_t>::one(),
       scalar_t beta=Teuchos::ScalarTraits<scalar_t>::zero() ) const {
-    // y = alpha C A C x + beta y
+    // y = alpha selection x + beta y
     y.elementWiseMultiply( alpha, *selection, x, beta );
 
   }
@@ -122,9 +122,48 @@ public:
 
 private:
   
-  const Teuchos::RCP<vector_t> selection;
+  const Teuchos::RCP<const vector_t> selection;
 };
 
+class ChainOperator : public operator_t {
+
+public:
+
+  ChainOperator( Teuchos::RCP<const operator_t> op0, Teuchos::RCP<const operator_t> op1 )
+    : op({ op0, op1 }) { ASSERT( op0->getRangeMap() == op1->getDomainMap() ); }
+
+  const Teuchos::RCP<const map_t> &getDomainMap() const {
+    return op[0]->getDomainMap();
+  }
+
+  const Teuchos::RCP<const map_t> &getRangeMap() const {
+    return op[1]->getRangeMap();
+  }
+
+  void apply(
+      const multivector_t &x,
+      multivector_t &y,
+      Teuchos::ETransp mode=Teuchos::NO_TRANS,
+      scalar_t alpha=Teuchos::ScalarTraits<scalar_t>::one(),
+      scalar_t beta=Teuchos::ScalarTraits<scalar_t>::zero() ) const {
+    // y = alpha op[1] op[0] x + beta y
+    // => tmp = op[0] x
+    //    y = alpha op[1] tmp + beta y
+    multivector_t tmp( op[0]->getRangeMap(), y.getNumVectors() );
+    const bool notrans = ( mode == Teuchos::NO_TRANS );
+    op[notrans?0:1]->apply( x, tmp, mode );
+    op[notrans?1:0]->apply( tmp, y, mode, alpha, beta );
+
+  }
+
+  bool hasTransposeApply() const {
+    return true;
+  }
+
+private:
+  
+  const Teuchos::RCP<const operator_t> op[2];
+};
 
 class ObjectArray {
 
@@ -824,6 +863,14 @@ private:
 
     Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
     Teuchos::RCP<const operator_t> precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
+    Teuchos::RCP<const operator_t> oldprecon = linprob->getLeftPrec();
+    if ( oldprecon.is_null() ) {
+      out(INFO) << "setting left preconditioner" << std::endl;
+    }
+    else {
+      out(INFO) << "wrapping existing left preconditioner" << std::endl;
+      precon = Teuchos::rcp<operator_t>( new ChainOperator( oldprecon, precon ) );
+    }
     linprob->setLeftPrec( precon );
   }
 
@@ -837,6 +884,14 @@ private:
 
     Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
     Teuchos::RCP<const operator_t> precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
+    Teuchos::RCP<const operator_t> oldprecon = linprob->getRightPrec();
+    if ( oldprecon.is_null() ) {
+      out(INFO) << "setting right preconditioner" << std::endl;
+    }
+    else {
+      out(INFO) << "wrapping existing right preconditioner" << std::endl;
+      precon = Teuchos::rcp<operator_t>( new ChainOperator( precon, oldprecon ) );
+    }
     linprob->setRightPrec( precon );
   }
 

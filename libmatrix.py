@@ -545,6 +545,8 @@ class Matrix( Operator ):
       linprob.add_precon( setzero, right=True )
       linprob.add_precon( setzero, right=False )
       rhs -= self.matvec( cons | 0 )
+    if precon:
+      linprob.add_precon( precon )
     lhs = linprob.solve( name, params )
     if cons:
       lhs = cons | lhs
