@@ -693,21 +693,25 @@ private:
     Teuchos::ArrayView<const local_t> current_icols;
     Teuchos::ArrayRCP<local_t> this_colidx( nitems[1] );
     Teuchos::ArrayRCP<scalar_t> this_data( nitems[1] );
-    for ( local_t irow = 0; irow < nitems[0]; irow++ ) {
-      int nnew = 0;
-      graph->getLocalRowView( rowidx[irow], current_icols );
-      for ( int icol = 0; icol < nitems[1]; icol++ ) {
-        int i = contains( current_icols, colidx[icol] ) ? icol - nnew : nitems[1] - (++nnew);
-        this_colidx[i] = colidx[icol];
-        this_data[i] = data[irow*nitems[1]+icol];
+    auto value = data.begin();
+    for ( auto irow : rowidx ) {
+      int nnew = 0, nold = 0;
+      graph->getLocalRowView( irow, current_icols );
+      for ( auto icol : colidx ) {
+        if ( *value != 0 ) {
+          int i = contains( current_icols, icol ) ? (nold++) : nitems[1] - (++nnew);
+          this_colidx[i] = icol;
+          this_data[i] = *value;
+        }
+        value++;
       }
       if ( nnew > 0 ) {
         out(INFO) << "inserting " << nnew << " new items in row " << irow << std::endl;
-        mat->insertLocalValues( rowidx[irow], this_colidx.view(nitems[1]-nnew,nnew), this_data.view(nitems[1]-nnew,nnew) );
+        mat->insertLocalValues( irow, this_colidx.view(nitems[1]-nnew,nnew), this_data.view(nitems[1]-nnew,nnew) );
       }
-      if ( nnew < nitems[1] ) {
-        out(INFO) << "adding " << nnew << " existing items in row " << irow << std::endl;
-        mat->sumIntoLocalValues( rowidx[irow], this_colidx.view(0,nitems[1]-nnew), this_data.view(0,nitems[1]-nnew) );
+      if ( nold > 0 ) {
+        out(INFO) << "adding " << nold << " existing items in row " << irow << std::endl;
+        mat->sumIntoLocalValues( irow, this_colidx.view(0,nold), this_data.view(0,nold) );
       }
     }
   }
