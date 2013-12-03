@@ -85,9 +85,11 @@ def test( nprocs, size ):
 
   print 'reconstructed vector:', numpy.array( numbers )
 
-  rhs = libmatrix.Vector( A.domainmap )
-  AA = libmatrix.Matrix( A.domainmap )
-  AA.add_global( idx=[[0],[0]], data=[[0]] )
+  rhs = libmatrix.Vector( rowmap )
+  rhs.add_global( [[0]], [5] )
+  rhs.complete()
+  AA = libmatrix.Matrix( rowmap )
+  AA.add_global( idx=[[0],[0]], data=[[1]] )
   AA.complete()
   cons = AA.solve( precon=A, rhs=rhs, name='CG' )
 
