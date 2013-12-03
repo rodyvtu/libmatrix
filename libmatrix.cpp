@@ -123,7 +123,10 @@ class ObjectArray {
 
 public:
 
-  inline void set_object( handle_t handle, Teuchos::RCP<Teuchos::Describable> object ) {
+  inline void set( handle_t handle, Teuchos::RCP<Teuchos::Describable> object, std::ostream &out ) {
+    if ( out != blackHole ) {
+      out << "set #" << handle << ": " << Teuchos::describe( *object, Teuchos::VERB_LOW ) << std::endl;
+    }
     if ( handle == objects.size() ) {
       objects.push_back( object );
     }
@@ -134,11 +137,15 @@ public:
   }
 
   template <class T>
-  inline Teuchos::RCP<T> get_object( handle_t handle ) {
-    return Teuchos::rcp_dynamic_cast<T>( objects[handle], true );
+  inline Teuchos::RCP<T> get( handle_t handle, std::ostream &out ) {
+    Teuchos::RCP<Teuchos::Describable> object = objects[handle];
+    if ( out != blackHole ) {
+      out << "get #" << handle << ": " << Teuchos::describe( *object, Teuchos::VERB_LOW ) << std::endl;
+    }
+    return Teuchos::rcp_dynamic_cast<T>( object, true );
   }
 
-  inline void release_object( handle_t handle ) {
+  inline void release( handle_t handle ) {
     objects[handle] = Teuchos::RCP<Teuchos::Describable>();
   }
 
@@ -211,7 +218,7 @@ private:
 
 };
 
-class LibMatrix : public Intercomm, public ObjectArray {
+class LibMatrix : public Intercomm {
 
 public:
 
@@ -231,7 +238,7 @@ public:
   
     out() << "creating parameter list #" << handle.params << std::endl;
   
-    set_object( handle.params, params );
+    objects.set( handle.params, params, out() );
   
   }
   
@@ -256,7 +263,7 @@ public:
     T value;
     bcast( &value );
   
-    Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
+    Teuchos::RCP<params_t> params = objects.get<params_t>( handle.params, out() );
     params->set( key, value );
   
     out() << "added key=\"" << key << "\" with value=" << value << std::endl;
@@ -270,7 +277,7 @@ public:
     struct { handle_t params; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<params_t> params = get_object<params_t>( handle.params );
+    Teuchos::RCP<params_t> params = objects.get<params_t>( handle.params, out() );
     params->print( out() );
   }
   
@@ -281,7 +288,7 @@ public:
   
     handle_t handle;
     bcast( &handle );
-    release_object( handle );
+    objects.release( handle );
   }
   
   void map_new() /* create new map
@@ -308,7 +315,7 @@ public:
     Teuchos::RCP<const Teuchos::Comm<int> > comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
     Teuchos::RCP<map_t> map = Teuchos::rcp( new map_t( size, elementList, indexbase, comm, node ) );
   
-    set_object( handle.map, map );
+    objects.set( handle.map, map, out() );
   }
   
   void vector_new() /* create new vector
@@ -319,13 +326,13 @@ public:
     struct { handle_t vector, map; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const map_t> map = get_object<const map_t>( handle.map );
+    Teuchos::RCP<const map_t> map = objects.get<const map_t>( handle.map, out() );
   
     out() << "creating vector #" << handle.vector << " from map #" << handle.map << std::endl;
   
     Teuchos::RCP<vector_t> vector = Teuchos::rcp( new vector_t( map ) );
   
-    set_object( handle.vector, vector );
+    objects.set( handle.vector, vector, out() );
   }
   
   void vector_add_block() /* add items to vector
@@ -360,7 +367,7 @@ public:
     recv( idx.getRawPtr(), nitems );
     recv( data.getRawPtr(), nitems );
   
-    Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
+    Teuchos::RCP<vector_t> vec = objects.get<vector_t>( handle.vector, out() );
   
     for ( int i = 0; i < nitems; i++ ) {
       out() << idx[i] << " : " << data[i] << std::endl;
@@ -378,7 +385,7 @@ public:
     struct { handle_t vector; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
+    Teuchos::RCP<vector_t> vec = objects.get<vector_t>( handle.vector, out() );
   
     Teuchos::ArrayRCP<const scalar_t> data = vec->getData();
   
@@ -397,7 +404,7 @@ public:
     scalar_t value;
     bcast( &value );
   
-    Teuchos::RCP<vector_t> vec = get_object<vector_t>( handle.vector );
+    Teuchos::RCP<vector_t> vec = objects.get<vector_t>( handle.vector, out() );
     vec->putScalar( value );
   }
   
@@ -409,8 +416,8 @@ public:
   
     struct { handle_t vector1, vector2; } handle;
     bcast( &handle );
-    Teuchos::RCP<vector_t> vector1 = get_object<vector_t>( handle.vector1 );
-    Teuchos::RCP<vector_t> vector2 = get_object<vector_t>( handle.vector2 );
+    Teuchos::RCP<vector_t> vector1 = objects.get<vector_t>( handle.vector1, out() );
+    Teuchos::RCP<vector_t> vector2 = objects.get<vector_t>( handle.vector2, out() );
   
     scalar_t dot = vector1->dot( *vector2 );
   
@@ -425,7 +432,7 @@ public:
   
     struct { handle_t vector; } handle;
     bcast( &handle );
-    Teuchos::RCP<vector_t> vector = get_object<vector_t>( handle.vector );
+    Teuchos::RCP<vector_t> vector = objects.get<vector_t>( handle.vector, out() );
   
     scalar_t norm = vector->norm2();
   
@@ -439,15 +446,15 @@ public:
 
     struct { handle_t vector, exporter; } handle;
     bcast( &handle );
-    Teuchos::RCP<vector_t> vector = get_object<vector_t>( handle.vector );
-    Teuchos::RCP<export_t> exporter = get_object<export_t>( handle.exporter );
+    Teuchos::RCP<vector_t> vector = objects.get<vector_t>( handle.vector, out() );
+    Teuchos::RCP<export_t> exporter = objects.get<export_t>( handle.exporter, out() );
     Teuchos::RCP<const map_t> map = exporter->getTargetMap();
 
     Teuchos::RCP<vector_t> completed_vector = Teuchos::rcp( new vector_t( map ) );
     completed_vector->doExport( *vector, *exporter, Tpetra::ADD );
 
-    release_object( handle.vector );
-    set_object( handle.vector, completed_vector );
+    objects.release( handle.vector );
+    objects.set( handle.vector, completed_vector, out() );
   }
 
   void vector_or() /* logical OR vectors
@@ -457,8 +464,8 @@ public:
 
     struct { handle_t self, other; } handle;
     bcast( &handle );
-    Teuchos::RCP<vector_t> self = get_object<vector_t>( handle.self );
-    Teuchos::RCP<const vector_t> other = get_object<vector_t>( handle.other );
+    Teuchos::RCP<vector_t> self = objects.get<vector_t>( handle.self, out() );
+    Teuchos::RCP<const vector_t> other = objects.get<vector_t>( handle.other, out() );
     ASSERT( self->getMap() == other->getMap() );
     Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
     Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
@@ -479,8 +486,8 @@ public:
     bcast( &handle );
     scalar_t factor;
     bcast( &factor );
-    Teuchos::RCP<vector_t> self = get_object<vector_t>( handle.self );
-    Teuchos::RCP<const vector_t> other = get_object<vector_t>( handle.other );
+    Teuchos::RCP<vector_t> self = objects.get<vector_t>( handle.self, out() );
+    Teuchos::RCP<const vector_t> other = objects.get<vector_t>( handle.other, out() );
     ASSERT( self->getMap() == other->getMap() );
     Teuchos::ArrayRCP<scalar_t> _self = self->getDataNonConst();
     Teuchos::ArrayRCP<const scalar_t> _other = other->getData();
@@ -496,9 +503,9 @@ public:
 
     struct { handle_t copy, orig; } handle;
     bcast( &handle );
-    Teuchos::RCP<const vector_t> orig = get_object<const vector_t>( handle.orig );
+    Teuchos::RCP<const vector_t> orig = objects.get<const vector_t>( handle.orig, out() );
     Teuchos::RCP<vector_t> copy = Teuchos::rcp<vector_t>( new vector_t( *orig ) );
-    set_object( handle.copy, copy );
+    objects.set( handle.copy, copy, out() );
   }
   
   void graph_new() /* create new graph
@@ -511,8 +518,8 @@ public:
     struct { handle_t graph, rowmap, colmap; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
-    Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
+    Teuchos::RCP<const map_t> rowmap = objects.get<const map_t>( handle.rowmap, out() );
+    Teuchos::RCP<const map_t> colmap = objects.get<const map_t>( handle.colmap, out() );
   
     size_t nrows = rowmap->getNodeNumElements();
   
@@ -528,7 +535,7 @@ public:
     Teuchos::RCP<crsgraph_t> graph = Teuchos::rcp( new crsgraph_t( rowmap, colmap, offsets, indices ) );
     graph->fillComplete();
   
-    set_object( handle.graph, graph );
+    objects.set( handle.graph, graph, out() );
   }
   
   void matrix_new_static() /* create new matrix
@@ -539,13 +546,13 @@ public:
     struct { handle_t matrix, graph; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const crsgraph_t> graph = get_object<const crsgraph_t>( handle.graph );
+    Teuchos::RCP<const crsgraph_t> graph = objects.get<const crsgraph_t>( handle.graph, out() );
   
     out() << "creating matrix #" << handle.matrix << " from graph #" << handle.graph << std::endl;
   
     Teuchos::RCP<crsmatrix_t> matrix = Teuchos::rcp( new crsmatrix_t( graph ) );
   
-    set_object( handle.matrix, matrix );
+    objects.set( handle.matrix, matrix, out() );
   }
 
   void matrix_new_dynamic() /* create new matrix
@@ -558,12 +565,12 @@ public:
 
     out() << "creating matrix #" << handle.matrix << " from rowmap #" << handle.rowmap << " and colmap #" << handle.colmap << std::endl;
 
-    Teuchos::RCP<const map_t> rowmap = get_object<const map_t>( handle.rowmap );
-    Teuchos::RCP<const map_t> colmap = get_object<const map_t>( handle.colmap );
+    Teuchos::RCP<const map_t> rowmap = objects.get<const map_t>( handle.rowmap, out() );
+    Teuchos::RCP<const map_t> colmap = objects.get<const map_t>( handle.colmap, out() );
 
     Teuchos::RCP<crsmatrix_t> matrix = Teuchos::rcp( new crsmatrix_t( rowmap, colmap, 0 ) );
 
-    set_object( handle.matrix, matrix );
+    objects.set( handle.matrix, matrix, out() );
   }
 
   void matrix_add_block() /* add items to matrix
@@ -601,7 +608,7 @@ public:
     recv( colidx.getRawPtr(), nitems[1] );
     recv( data.getRawPtr(), nitems[0] * nitems[1] );
   
-    Teuchos::RCP<crsmatrix_t> mat = get_object<crsmatrix_t>( handle.matrix );
+    Teuchos::RCP<crsmatrix_t> mat = objects.get<crsmatrix_t>( handle.matrix, out() );
     Teuchos::RCP<const crsgraph_t> graph = mat->getCrsGraph();
   
     Teuchos::ArrayView<const local_t> current_icols;
@@ -634,8 +641,8 @@ public:
     struct { handle_t matrix, exporter; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const crsmatrix_t> matrix = get_object<const crsmatrix_t>( handle.matrix );
-    Teuchos::RCP<const export_t> exporter = get_object<const export_t>( handle.exporter );
+    Teuchos::RCP<const crsmatrix_t> matrix = objects.get<const crsmatrix_t>( handle.matrix, out() );
+    Teuchos::RCP<const export_t> exporter = objects.get<const export_t>( handle.exporter, out() );
     Teuchos::RCP<const map_t> domainmap = exporter->getTargetMap();
     Teuchos::RCP<const map_t> rangemap = exporter->getTargetMap();
   
@@ -644,8 +651,8 @@ public:
     Teuchos::RCP<crsmatrix_t> completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
     // defaults to "ADD" combine mode (reverseMode=false in Tpetra_CrsMatrix_def.hpp)
   
-    release_object( handle.matrix );
-    set_object( handle.matrix, completed_matrix );
+    objects.release( handle.matrix );
+    objects.set( handle.matrix, completed_matrix, out() );
   }
   
   void matrix_norm() /* compute frobenius norm
@@ -656,7 +663,7 @@ public:
   
     struct { handle_t matrix; } handle;
     bcast( &handle );
-    Teuchos::RCP<crsmatrix_t> matrix = get_object<crsmatrix_t>( handle.matrix );
+    Teuchos::RCP<crsmatrix_t> matrix = objects.get<crsmatrix_t>( handle.matrix, out() );
   
     scalar_t norm = matrix->getFrobeniusNorm();
   
@@ -671,9 +678,9 @@ public:
     struct { handle_t matrix, rhs, lhs; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<crsmatrix_t> matrix = get_object<crsmatrix_t>( handle.matrix );
-    Teuchos::RCP<vector_t> rhs = get_object<vector_t>( handle.rhs );
-    Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
+    Teuchos::RCP<crsmatrix_t> matrix = objects.get<crsmatrix_t>( handle.matrix, out() );
+    Teuchos::RCP<vector_t> rhs = objects.get<vector_t>( handle.rhs, out() );
+    Teuchos::RCP<vector_t> lhs = objects.get<vector_t>( handle.lhs, out() );
   
     matrix->apply( *rhs, *lhs );
   }
@@ -686,7 +693,7 @@ public:
     struct { handle_t setzero, vector; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const vector_t> vector = get_object<const vector_t>( handle.vector );
+    Teuchos::RCP<const vector_t> vector = objects.get<const vector_t>( handle.vector, out() );
     Teuchos::RCP<vector_t> selection = Teuchos::rcp( new vector_t( vector->getMap() ) );
 
     Teuchos::ArrayRCP<const scalar_t> _vector = vector->getData();
@@ -696,7 +703,7 @@ public:
       out() << "i=" << i << " selection=" << _selection[i] << std::endl;
     }
     Teuchos::RCP<SetZero> setzero = Teuchos::rcp( new SetZero(selection) );
-    set_object( handle.setzero, setzero );
+    objects.set( handle.setzero, setzero, out() );
   }
 
   void precon_new() /* create new preconditioner
@@ -707,8 +714,8 @@ public:
     struct { handle_t precon, matrix, precontype, preconparams; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const crsmatrix_t> matrix = get_object<const crsmatrix_t>( handle.matrix );
-    Teuchos::RCP<const params_t> preconparams = get_object<const params_t>( handle.preconparams );
+    Teuchos::RCP<const crsmatrix_t> matrix = objects.get<const crsmatrix_t>( handle.matrix, out() );
+    Teuchos::RCP<const params_t> preconparams = objects.get<const params_t>( handle.preconparams, out() );
    
     preconfactory_t factory;
     Teuchos::RCP<precon_t> precon = factory.create( supportedPreconNames[handle.precontype], matrix );
@@ -720,7 +727,7 @@ public:
     magnitude_t condest = precon->computeCondEst( Ifpack2::Cheap );
     out() << "Ifpack2 preconditioner's estimated condition number: " << condest << std::endl;
   
-    set_object( handle.precon, precon );
+    objects.set( handle.precon, precon, out() );
   }
   
   void export_new() /* create new exporter
@@ -731,12 +738,12 @@ public:
     struct { handle_t exporter, srcmap, dstmap; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const map_t> srcmap = get_object<const map_t>( handle.srcmap );
-    Teuchos::RCP<const map_t> dstmap = get_object<const map_t>( handle.dstmap );
+    Teuchos::RCP<const map_t> srcmap = objects.get<const map_t>( handle.srcmap, out() );
+    Teuchos::RCP<const map_t> dstmap = objects.get<const map_t>( handle.dstmap, out() );
   
     Teuchos::RCP<export_t> exporter = Teuchos::rcp( new export_t( srcmap, dstmap ) );
   
-    set_object( handle.exporter, exporter );
+    objects.set( handle.exporter, exporter, out() );
   }
 
   void linearproblem_new() /* create new linear problem
@@ -747,13 +754,13 @@ public:
     struct { handle_t linprob, matrix, lhs, rhs; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<const operator_t> matrix = get_object<const operator_t>( handle.matrix );
-    Teuchos::RCP<vector_t> lhs = get_object<vector_t>( handle.lhs );
-    Teuchos::RCP<const vector_t> rhs = get_object<const vector_t>( handle.rhs );
+    Teuchos::RCP<const operator_t> matrix = objects.get<const operator_t>( handle.matrix, out() );
+    Teuchos::RCP<vector_t> lhs = objects.get<vector_t>( handle.lhs, out() );
+    Teuchos::RCP<const vector_t> rhs = objects.get<const vector_t>( handle.rhs, out() );
 
     Teuchos::RCP<linearproblem_t> linprob = Teuchos::rcp( new linearproblem_t( matrix, lhs, rhs ) );
   
-    set_object( handle.linprob, linprob );
+    objects.set( handle.linprob, linprob, out() );
   }
 
   void linearproblem_set_hermitian() /* tell that operator is hermitian
@@ -764,7 +771,7 @@ public:
     struct { handle_t linprob; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
+    Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out() );
     linprob->setHermitian();
   }
 
@@ -780,8 +787,8 @@ public:
     bool_t right;
     bcast( &right );
   
-    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
-    Teuchos::RCP<const operator_t> precon = get_object<const operator_t>( handle.precon );
+    Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out() );
+    Teuchos::RCP<const operator_t> precon = objects.get<const operator_t>( handle.precon, out() );
     ((*linprob).*( right ? &linearproblem_t::setRightPrec : &linearproblem_t::setLeftPrec ))( precon );
   }
 
@@ -793,8 +800,8 @@ public:
     struct { handle_t linprob, solverparams, solvertype; } handle;
     bcast( &handle );
   
-    Teuchos::RCP<linearproblem_t> linprob = get_object<linearproblem_t>( handle.linprob );
-    Teuchos::RCP<params_t> solverparams = get_object<params_t>( handle.solverparams );
+    Teuchos::RCP<linearproblem_t> linprob = objects.get<linearproblem_t>( handle.linprob, out() );
+    Teuchos::RCP<params_t> solverparams = objects.get<params_t>( handle.solverparams, out() );
 
     solverfactory_t factory;
     Teuchos::RCP<solvermanager_t> solver = factory.create( factory.supportedSolverNames()[handle.solvertype], solverparams );
@@ -851,6 +858,7 @@ public:
 private:
 
   bool verbose = false;
+  ObjectArray objects;
 
 };
 
