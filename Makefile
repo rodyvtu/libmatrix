@@ -16,7 +16,7 @@ null :=
 space := $(null) #
 comma := ,
 macros := \
-	-DFUNCNAMES='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),std::string("$(token)")))' \
+	-DFUNCNAMES='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),"$(token)"))' \
 	-DFUNCS='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),&LibMatrix::$(token)))'
 
 libmatrix.mpi: libmatrix.cpp

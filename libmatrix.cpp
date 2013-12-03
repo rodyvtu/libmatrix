@@ -86,9 +86,7 @@ public:
 
 const global_t indexbase = 0;
 
-const std::string _funcnames[] = { FUNCNAMES };
-const size_t nfuncs = sizeof(_funcnames) / sizeof(_funcnames[0]);
-const std::vector<std::string> funcnames( _funcnames, _funcnames + nfuncs );
+const std::vector<std::string> funcnames = { FUNCNAMES };
 
 class SetZero : public operator_t {
 
@@ -283,11 +281,10 @@ public:
     LibMatrix libmat( progname );
     typedef void (LibMatrix::*funcptr)();
     const funcptr ftable[] = { FUNCS };
-    int nfuncs = sizeof(ftable) / sizeof(ftable[0]);
     token_t c;
     for ( ;; ) {
       libmat.bcast( &c );
-      if ( c >= nfuncs ) {
+      if ( c >= funcnames.size() ) {
         libmat.out(DEBUG) << "quit" << std::endl;
         break;
       }
