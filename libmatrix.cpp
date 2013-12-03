@@ -769,6 +769,26 @@ private:
     matrix->apply( *rhs, *lhs );
   }
   
+  void matrix_supp_to_nan() /* set vector items to nan for non suppored rows
+     
+       -> broadcast HANDLE handle.{matrix,vector}
+  */{
+  
+    struct { handle_t matrix, vector; } handle;
+    bcast( &handle );
+  
+    auto matrix = objects.get<crsmatrix_t>( handle.matrix, out(DEBUG) );
+    auto vector = objects.get<vector_t>( handle.vector, out(DEBUG) );
+    auto graph = matrix->getGraph();
+    int irow = 0;
+    for ( auto &vector_i : vector->getDataNonConst() ) {
+      if ( graph->getNumEntriesInLocalRow( irow ) == 0 ) {
+        vector_i = NAN;
+      }
+      irow++;
+    }
+  }
+  
   void vector_as_setzero_operator() /* create setzero from nan values
      
        -> broadcast HANDLE handle.{setzero,vector}
@@ -925,21 +945,6 @@ private:
     // overwrites X with the computed approximate solution.
     Belos::ReturnType result = solver->solve();
 
-    auto crsmatrix = Teuchos::rcp_dynamic_cast<const crsmatrix_t>( linprob->getOperator() );
-    if ( ! crsmatrix.is_null() ) {
-      auto graph = crsmatrix->getGraph();
-      auto mlhs = linprob->getLHS();
-      for ( int ivec = 0; ivec < mlhs->getNumVectors(); ivec++ ) {
-        auto _lhs = mlhs->getDataNonConst( ivec );
-        for ( int irow = 0; irow < _lhs.size(); irow++ ) {
-          if ( graph->getNumEntriesInLocalRow( irow ) == 0 ) {
-            out(INFO) << "row " << irow << " is empty" << std::endl;
-            _lhs[irow] = NAN;
-          }
-        }
-      }
-    }
-  
     // Ask the solver how many iterations the last solve() took.
     const int numIters = solver->getNumIters();
   

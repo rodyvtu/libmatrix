@@ -92,6 +92,7 @@ def test( nprocs, size ):
   AA.add_global( idx=[[0],[0]], data=[[1]] )
   AA.complete()
   cons = AA.solve( precon=A, rhs=rhs, name='CG' )
+  AA.supp_to_nan( cons )
 
   P = libmatrix.Precon( A, 'ILUT' )
   x = A.solve( precon=P, rhs=w, name='CG', cons=cons )
