@@ -84,6 +84,11 @@ public:
 
 const global_t indexbase = 0;
 
+const std::string _funcnames[] = { FUNCNAMES };
+const size_t nfuncs = sizeof(_funcnames) / sizeof(_funcnames[0]);
+const std::vector<std::string> funcnames( _funcnames, _funcnames + nfuncs );
+
+
 class SetZero : public operator_t {
 
 public:
@@ -222,9 +227,35 @@ class LibMatrix : public Intercomm {
 
 public:
 
-  LibMatrix( char *progname ) : Intercomm( progname ) {}
+  static int eventloop( char *progname ) {
+    LibMatrix libmat( progname );
+    typedef void (LibMatrix::*funcptr)();
+    const funcptr ftable[] = { FUNCS };
+    int nfuncs = sizeof(ftable) / sizeof(ftable[0]);
+    token_t c;
+    for ( ;; ) {
+      libmat.bcast( &c );
+      if ( c >= nfuncs ) {
+        libmat.out() << "quit" << std::endl;
+        break;
+      }
+      libmat.out() << "enter " << funcnames[c] << std::endl;
+      try {
+        (libmat.*ftable[c])();
+      }
+      catch ( const char *s ) {
+        libmat.out() << "error in " << funcnames[c] << ": " << s << std::endl;
+        libmat.abort();
+        return 1;
+      }
+      libmat.out() << "leave " << funcnames[c] << std::endl;
+    }
+    return 0;
+  }
 
-  typedef void (LibMatrix::*funcptr)();
+private:
+
+  LibMatrix( char *progname ) : Intercomm( progname ) {}
 
   void params_new() /* create new parameter list
      
@@ -863,52 +894,21 @@ private:
 };
 
 int main( int argc, char *argv[] ) {
-
-  const LibMatrix::funcptr FTABLE[] = { FUNCS };
-  const size_t NFUNCS = sizeof(FTABLE) / sizeof(LibMatrix::funcptr);
-  const std::string _funcnames[] = { FUNCNAMES };
-  const std::vector<std::string> funcnames( _funcnames, _funcnames + NFUNCS );
-
-  if ( argc == 2 && std::strcmp( argv[1], "info" ) == 0 ) {
-    print_all( "functions", funcnames );
-    print_all( "solvers", solverfactory_t().supportedSolverNames() );
-    print_all( "precons", supportedPreconNames );
-    std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;
-    std::cout << "local_t: int" << (sizeof(local_t) << 3) << std::endl;
-    std::cout << "global_t: int" << (sizeof(global_t) << 3) << std::endl;
-    std::cout << "size_t: uint" << (sizeof(size_t) << 3) << std::endl;
-    std::cout << "handle_t: int" << (sizeof(handle_t) << 3) << std::endl;
-    std::cout << "number_t: int" << (sizeof(number_t) << 3) << std::endl;
-    std::cout << "bool_t: uint" << (sizeof(bool_t) << 3) << std::endl;
-    std::cout << "scalar_t: float" << (sizeof(scalar_t) << 3) << std::endl;
+  if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
+    return LibMatrix::eventloop( argv[0] );
   }
-  else if ( argc == 2 && std::strcmp( argv[1], "eventloop" ) == 0 ) {
-    LibMatrix intercomm( argv[0] );
-    token_t c;
-    for ( ;; ) {
-      intercomm.bcast( &c );
-      if ( c >= NFUNCS ) {
-        intercomm.out() << "quit" << std::endl;
-        break;
-      }
-      intercomm.out() << "enter " << funcnames[c] << std::endl;
-      try {
-        (intercomm.*FTABLE[c])();
-      }
-      catch ( const char *s ) {
-        std::cerr << "error in " << funcnames[c] << ": " << s << std::endl;
-        intercomm.abort();
-        break;
-      }
-      intercomm.out() << "leave " << funcnames[c] << std::endl;
-    }
-    intercomm.out() << "EXIT" << std::endl;
-  }
-  else {
-    std::cout << "syntax: " << argv[0] << " info|eventloop" << std::endl;
-    return 1;
-  }
-  return 0;
+  print_all( "functions", funcnames );
+  print_all( "solvers", solverfactory_t().supportedSolverNames() );
+  print_all( "precons", supportedPreconNames );
+  std::cout << "token_t: uint" << (sizeof(token_t) << 3) << std::endl;
+  std::cout << "local_t: int" << (sizeof(local_t) << 3) << std::endl;
+  std::cout << "global_t: int" << (sizeof(global_t) << 3) << std::endl;
+  std::cout << "size_t: uint" << (sizeof(size_t) << 3) << std::endl;
+  std::cout << "handle_t: int" << (sizeof(handle_t) << 3) << std::endl;
+  std::cout << "number_t: int" << (sizeof(number_t) << 3) << std::endl;
+  std::cout << "bool_t: uint" << (sizeof(bool_t) << 3) << std::endl;
+  std::cout << "scalar_t: float" << (sizeof(scalar_t) << 3) << std::endl;
+  return 1;
 }
 
 
