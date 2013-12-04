@@ -819,10 +819,12 @@ private:
     int offset = 0;
     for ( local_t irow = 0; irow < nrows; irow++ ) {
       matrix->getLocalRowView( irow, indices, values );
-      all_values.view( offset, values.size() ).assign( values );
-      for ( auto idx : indices ) {
-        all_indices[offset] = colmap->getGlobalElement( idx );
-        offset++;
+      if ( values.size() ) {
+        all_values.view( offset, values.size() ).assign( values );
+        for ( auto idx : indices ) {
+          all_indices[offset] = colmap->getGlobalElement( idx );
+          offset++;
+        }
       }
     }
     gatherv( all_indices.get(), all_indices.size() );
