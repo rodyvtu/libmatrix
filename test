@@ -68,22 +68,10 @@ def test( nprocs, size ):
   print 'libmatrix result:', w.toarray()
   print 'reference result:', numpy.dot( A_npy, v_npy )
 
-  vectors = []
-  numbers = []
-  for i in range(size):
-    ei = libmatrix.Vector( rowmap )
-    ei.add_global( idx=[[i]], data=[1] )
-    ei.complete( export )
-    #print 'unit vector i=%d:' % i, ei.toarray()
-    vectors.append( A.matvec( ei ).toarray() )
-    numbers.append( v.dot( ei ) )
-
-  B = numpy.array( vectors )
+  B = A.toarray()
   print B
   print 'reconstructed norm:', numpy.sqrt( ( B**2 ).sum() )
   print 'reference norm:', numpy.sqrt( ( A_npy**2 ).sum() )
-
-  print 'reconstructed vector:', numpy.array( numbers )
 
   rhs = libmatrix.Vector( rowmap )
   rhs.add_global( [[0]], [5] )

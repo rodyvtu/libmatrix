@@ -158,12 +158,14 @@ class LibMatrix( InterComm ):
     self.send( rank, data, scalar_t )
 
   @bcast_token
-  def vector_getdata( self, vec_handle, local2global ):
+  def vector_toarray( self, vec_handle ):
     self.bcast( vec_handle, handle_t )
-    lengths = map( len, local2global )
-    array = numpy.empty( sum(lengths) )
-    local_arrays = self.gatherv( lengths, scalar_t )
-    map( array.__setitem__, local2global, local_arrays )
+    nitems_perproc = self.gather( size_t )
+    indices = self.gatherv( nitems_perproc, global_t )
+    values = self.gatherv( nitems_perproc, scalar_t )
+    nitems = sum( nitems_perproc )
+    array = numpy.empty( nitems, dtype=scalar_t )
+    map( array.__setitem__, indices, values )
     return array
 
   @bcast_token
@@ -237,6 +239,32 @@ class LibMatrix( InterComm ):
   @bcast_token
   def matrix_apply( self, matrix_handle, vec_handle, out_handle ):
     self.bcast( [ matrix_handle, vec_handle, out_handle ], handle_t )
+
+  @bcast_token
+  def matrix_toarray( self, matrix_handle ):
+    self.bcast( matrix_handle, handle_t )
+    ncols_perproc = self.gather( size_t )
+    nrows_perproc = self.gather( size_t )
+    irows = self.gatherv( nrows_perproc, global_t )
+    nitems = self.gatherv( nrows_perproc, size_t )
+    nentries = map( sum, nitems )
+    icols = self.gatherv( nentries, global_t )
+    values = self.gatherv( nentries, scalar_t )
+    shape = sum( nrows_perproc ), sum( ncols_perproc )
+    array = numpy.zeros( shape, dtype=scalar_t )
+    for _nitems, _irows, _icols, _values in zip( nitems, irows, icols, values ):
+      for i, n, d in zip( _irows, _nitems, numpy.cumsum( _nitems ) ):
+        s = slice(d-n,d)
+        j = _icols[s]
+        v = _values[s]
+        array[i,j] = v
+    return array
+
+
+    #array = numpy.empty( sum(lengths) )
+    #local_arrays = self.gatherv( lengths, scalar_t )
+    #map( array.__setitem__, local2global, local_arrays )
+    #return array
 
   @bcast_token
   def vector_nan_from_supp( self, vector_handle, matrix_handle ):
@@ -406,7 +434,9 @@ class Vector( Object ):
 
   def toarray( self ):
     assert self.map.is1to1
-    return self.comm.vector_getdata( self.handle, self.map.local2global )
+    array = self.comm.vector_toarray( self.handle )
+    assert array.shape == self.shape
+    return array
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
@@ -529,7 +559,7 @@ class Matrix( Operator ):
     assert isinstance( export, Export )
     assert self.rowmap == export.srcmap
     self.comm.matrix_complete( self.handle, export.handle )
-    self.domainmap = self.rangemap = export.dstmap
+    self.domainmap = self.rangemap = self.rowmap = export.dstmap
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
@@ -561,6 +591,11 @@ class Matrix( Operator ):
       lhs = constrain | lhs
     return lhs
 
+  def toarray( self ):
+    assert self.rowmap.is1to1
+    array = self.comm.matrix_toarray( self.handle )
+    assert array.shape == self.shape
+    return array
 
 class LinearProblem( Object ):
 

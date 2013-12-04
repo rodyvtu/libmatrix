@@ -455,18 +455,26 @@ private:
   
   }
   
-  void vector_getdata() /* collect vector over the intercom
+  void vector_toarray() /* collect vector over the intercom
     
        -> broadcast HANDLE handle.vector
-      <-  gatherv SCALAR values[vector.size]
+      <-  gather SIZE nitems
+      <-  gatherv GLOBAL indices[nitems]
+      <-  gatherv SCALAR values[nitems]
   */{
   
     struct { handle_t vector; } handle;
     bcast( &handle );
   
     auto vec = objects.get<vector_t>( handle.vector, out(DEBUG) );
-  
+    auto map = vec->getMap();
     auto data = vec->getData();
+
+    size_t nitems = map->getNodeNumElements();
+    gather( &nitems );
+
+    auto iitems = map->getNodeElementList();
+    gatherv( iitems.getRawPtr(), iitems.size() );
   
     gatherv( data.get(), data.size() );
   }
@@ -765,6 +773,61 @@ private:
   
     matrix->apply( *rhs, *lhs );
   }
+
+  void matrix_toarray() /* matrix vector multiplication
+     
+       -> broadcast HANDLE handle.matrix
+      <-  gather SIZE ncols
+      <-  gather SIZE nrows
+      <-  gatherv GLOBAL irows[nrows]
+      <-  gatherv SIZE nentries_per_row[nrows]
+      <-  gatherv GLOBAL icols[nentries]
+      <-  gatherv SCALAR values[nentries]
+  */{
+  
+    struct { handle_t matrix; } handle;
+    bcast( &handle );
+  
+    auto matrix = objects.get<crsmatrix_t>( handle.matrix, out(DEBUG) );
+    auto domainmap = matrix->getDomainMap();
+    auto rowmap = matrix->getRowMap();
+    auto colmap = matrix->getColMap();
+
+    size_t ncols = domainmap->getNodeNumElements();
+    gather( &ncols );
+
+    size_t nrows = rowmap->getNodeNumElements();
+    gather( &nrows );
+
+    auto irows = rowmap->getNodeElementList();
+    gatherv( irows.getRawPtr(), irows.size() );
+
+    Teuchos::ArrayRCP<size_t> nentries_per_row( nrows );
+    local_t irow = 0;
+    int nentries = 0;
+    for ( auto &entry : nentries_per_row ) {
+      entry = matrix->getNumEntriesInLocalRow( irow );
+      nentries += entry;
+      irow++;
+    }
+    gatherv( nentries_per_row.get(), nentries_per_row.size() );
+
+    Teuchos::ArrayRCP<global_t> all_indices( nentries );
+    Teuchos::ArrayRCP<scalar_t> all_values( nentries );
+    Teuchos::ArrayView<const local_t> indices;
+    Teuchos::ArrayView<const scalar_t> values;
+    int offset = 0;
+    for ( local_t irow = 0; irow < nrows; irow++ ) {
+      matrix->getLocalRowView( irow, indices, values );
+      all_values.view( offset, values.size() ).assign( values );
+      for ( auto idx : indices ) {
+        all_indices[offset] = colmap->getGlobalElement( idx );
+        offset++;
+      }
+    }
+    gatherv( all_indices.get(), all_indices.size() );
+    gatherv( all_values.get(), all_values.size() );
+  }
   
   void vector_nan_from_supp() /* set vector items to nan for non suppored rows
      
@@ -777,7 +840,7 @@ private:
     auto vector = objects.get<vector_t>( handle.vector, out(DEBUG) );
     auto matrix = objects.get<const crsmatrix_t>( handle.matrix, out(DEBUG) );
     auto graph = matrix->getGraph();
-    int irow = 0;
+    local_t irow = 0;
     for ( auto &vector_i : vector->getDataNonConst() ) {
       if ( graph->getNumEntriesInLocalRow( irow ) == 0 ) {
         vector_i = NAN;
