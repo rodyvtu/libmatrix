@@ -187,15 +187,13 @@ class LibMatrix( InterComm ):
     self.bcast( [ self_handle, other_handle ], handle_t )
 
   @bcast_token
+  def vector_imul( self, self_handle, other_handle ):
+    self.bcast( [ self_handle, other_handle ], handle_t )
+
+  @bcast_token
   def vector_axpy( self, self_handle, other_handle, factor ):
     self.bcast( [ self_handle, other_handle ], handle_t )
     self.bcast( factor, scalar_t )
-
-  @bcast_token
-  def vector_as_setzero_operator( self, vector_handle ):
-    setzero_handle = self.claim_handle()
-    self.bcast( [ setzero_handle, vector_handle ], handle_t )
-    return setzero_handle
 
   @bcast_token
   def matrix_new_static( self, graph_handle ):
@@ -232,13 +230,19 @@ class LibMatrix( InterComm ):
     self.bcast( [ matrix_handle, export_handle ], handle_t )
 
   @bcast_token
+  def matrix_constrained( self, matrix_handle, vector_handle ):
+    conmat_handle = self.claim_handle()
+    self.bcast( [ conmat_handle, matrix_handle, vector_handle ], handle_t )
+    return conmat_handle
+
+  @bcast_token
   def matrix_norm( self, handle ):
     self.bcast( handle, handle_t )
     return self.gather_equal( scalar_t )
 
   @bcast_token
-  def matrix_apply( self, matrix_handle, vec_handle, out_handle ):
-    self.bcast( [ matrix_handle, vec_handle, out_handle ], handle_t )
+  def operator_apply( self, operator_handle, vec_handle, out_handle ):
+    self.bcast( [ operator_handle, vec_handle, out_handle ], handle_t )
 
   @bcast_token
   def matrix_toarray( self, matrix_handle ):
@@ -259,12 +263,6 @@ class LibMatrix( InterComm ):
         v = _values[s]
         array[i,j] = v
     return array
-
-
-    #array = numpy.empty( sum(lengths) )
-    #local_arrays = self.gatherv( lengths, scalar_t )
-    #map( array.__setitem__, local2global, local_arrays )
-    #return array
 
   @bcast_token
   def vector_nan_from_supp( self, vector_handle, matrix_handle ):
@@ -446,12 +444,8 @@ class Vector( Object ):
     assert self.shape == other.shape
     return self.comm.vector_dot( self.handle, other.handle )
 
-  def complete( self, export=None ):
-    if export:
-      assert isinstance( export, Export )
-      assert export.srcmap == self.map
-    else:
-      export = self.map.export
+  def complete( self ):
+    export = self.map.export
     self.comm.vector_complete( self.handle, export.handle )
     self.map = export.dstmap
 
@@ -482,6 +476,14 @@ class Vector( Object ):
     self.comm.vector_axpy( self.handle, other.handle, 1 )
     return self
 
+  def __mul__( self, other ):
+    return Vector(self).__imul__( other )
+
+  def __imul__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_imul( self.handle, other.handle )
+    return self
+
   def asme( self, other ):
     if isinstance( other, (int,float) ):
       value = other
@@ -491,19 +493,35 @@ class Vector( Object ):
     assert other.map == self.map
     return other
 
-  def as_setzero_operator( self ):
-    handle = self.comm.vector_as_setzero_operator( self.handle )
-    return Operator( self.comm, handle, self.shape*2 )
-
   def nan_from_supp( self, matrix ):
     self.comm.vector_nan_from_supp( self.handle, matrix.handle )
 
 
 class Operator( Object ):
 
-  def __init__( self, comm, handle, shape ):
-    self.shape = tuple(shape)
+  def __init__( self, comm, handle, domainmap, rangemap ):
+    assert isinstance( domainmap, Map )
+    assert isinstance( rangemap, Map )
+    self.domainmap = domainmap
+    self.rangemap = rangemap
+    self.shape = rangemap.size, domainmap.size
     Object.__init__( self, comm, handle )
+
+  def apply( self, vec ):
+    assert isinstance( vec, Vector )
+    assert vec.map == self.domainmap
+    out = Vector( self.rangemap )
+    self.comm.operator_apply( self.handle, vec.handle, out.handle )
+    return out
+
+  def toarray( self ):
+
+    array = numpy.empty( self.shape, dtype=float )
+    for i in range( self.shape[1] ):
+      e = Vector( self.domainmap )
+      e.add_global( [[i]], [1] )
+      array[:,i] = self.apply( e ).toarray()
+    return array
 
 
 class Precon( Operator ):
@@ -517,7 +535,7 @@ class Precon( Operator ):
       assert isinstance( preconparams, ParameterList )
       assert preconparams.comm is comm
     myhandle = comm.precon_new( matrix.handle, _precons.index(precontype), preconparams.handle )
-    Operator.__init__( self, comm, myhandle, reversed(matrix.shape) )
+    Operator.__init__( self, comm, myhandle, matrix.rangemap, matrix.domainmap )
 
 
 class Matrix( Operator ):
@@ -540,7 +558,8 @@ class Matrix( Operator ):
         assert self.colmap.comm is comm
       matrix_handle = comm.matrix_new_dynamic( self.rowmap.handle, self.colmap.handle )
     self.shape = self.rowmap.size, self.colmap.size
-    Operator.__init__( self, comm, matrix_handle, self.shape )
+    domainmap = rangemap = self.rowmap.export.dstmap
+    Operator.__init__( self, comm, matrix_handle, domainmap, rangemap )
 
   def add( self, rank, idx, data ):
     rowidx, colidx = idx
@@ -553,43 +572,41 @@ class Matrix( Operator ):
     rank = first( ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ) )
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
-  def complete( self, export=None ):
-    if not export:
-      export = self.rowmap.export
+  def complete( self ):
+    export = self.rowmap.export
     assert isinstance( export, Export )
     assert self.rowmap == export.srcmap
     self.comm.matrix_complete( self.handle, export.handle )
-    self.domainmap = self.rangemap = self.rowmap = export.dstmap
+    self.rowmap = export.dstmap
+    self.colmap = None
+
+  def constrained( self, selection ):
+    handle = self.comm.matrix_constrained( self.handle, selection.handle )
+    return Operator( self.comm, handle, self.domainmap, self.rangemap )
 
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
 
-  def matvec( self, vec ):
-    assert isinstance( vec, Vector )
-    assert vec.map == self.domainmap
-    out = Vector( self.rangemap )
-    self.comm.matrix_apply( self.handle, vec.handle, out.handle )
-    return out
-
-  def solve( self, rhs, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
-    linprob = LinearProblem( self, rhs, lhs )
-    if symmetric:
-      linprob.set_hermitian()
+  def solve( self, rhs=None, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
     if constrain:
       assert isinstance( constrain, Vector )
       assert constrain.map == self.domainmap
-      setzero = constrain.as_setzero_operator()
-      linprob.add_precon( setzero, right=True )
-      linprob.add_precon( setzero, right=False )
-      rhs -= self.matvec( constrain | 0 )
+      matrix = self.constrained( constrain )
+      if not rhs:
+        rhs = Vector( self.rangemap )
+      rhs = constrain | ( rhs - self.apply( constrain | 0 ) )
+    else:
+      if not rhs:
+        return Vector( self.domainmap )
+      matrix = self
+    linprob = LinearProblem( matrix, rhs, lhs )
+    if symmetric:
+      linprob.set_hermitian()
     if precon:
       linprob.add_precon( precon )
     if not name:
       name = 'CG' if symmetric else 'GMRES'
-    lhs = linprob.solve( name, params )
-    if constrain:
-      lhs = constrain | lhs
-    return lhs
+    return linprob.solve( name, params )
 
   def toarray( self ):
     assert self.rowmap.is1to1

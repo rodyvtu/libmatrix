@@ -88,19 +88,19 @@ const global_t indexbase = 0;
 
 const std::vector<std::string> funcnames = { FUNCNAMES };
 
-class SetZero : public operator_t {
+class ConstrainedOperator : public operator_t {
 
 public:
 
-  SetZero( Teuchos::RCP<const vector_t> selection )
-    : selection( selection ) {}
+  ConstrainedOperator( Teuchos::RCP<const operator_t> op, Teuchos::Array<local_t> con_items )
+    : op( op ), con_items( con_items ) {}
 
   const Teuchos::RCP<const map_t> &getDomainMap() const {
-    return selection->getMap();
+    return op->getDomainMap();
   }
 
   const Teuchos::RCP<const map_t> &getRangeMap() const {
-    return selection->getMap();
+    return op->getRangeMap();
   }
 
   void apply(
@@ -109,9 +109,26 @@ public:
       Teuchos::ETransp mode=Teuchos::NO_TRANS,
       scalar_t alpha=Teuchos::ScalarTraits<scalar_t>::one(),
       scalar_t beta=Teuchos::ScalarTraits<scalar_t>::zero() ) const {
-    // y = alpha selection x + beta y
-    y.elementWiseMultiply( alpha, *selection, x, beta );
+    // y = alpha ( C A C + I - C ) x + beta y
 
+    auto nvec = x.getNumVectors();
+    multivector_t tmp1( x );
+    for ( int ivec = 0; ivec < nvec; ivec++ ) {
+      auto _tmp1 = tmp1.getDataNonConst( ivec );
+      for ( const local_t i : con_items ) {
+        _tmp1[i] = 0;
+      }
+    }
+    multivector_t tmp2( y.getMap(), nvec, false );
+    op->apply( tmp1, tmp2, mode );
+    for ( int ivec = 0; ivec < nvec; ivec++ ) {
+      auto _tmp2 = tmp2.getDataNonConst( ivec );
+      auto _x = x.getData( ivec );
+      for ( const local_t i : con_items ) {
+        _tmp2[i] = _x[i];
+      }
+    }
+    y.update( alpha, tmp2, beta );
   }
 
   bool hasTransposeApply() const {
@@ -120,7 +137,9 @@ public:
 
 private:
   
-  const Teuchos::RCP<const vector_t> selection;
+  const Teuchos::Array<local_t> con_items;
+  const Teuchos::RCP<const operator_t> op;
+
 };
 
 class ChainOperator : public operator_t {
@@ -219,48 +238,48 @@ public:
     char **argv = &progname;
     MPI::Init( argc, argv ); 
     MPI::COMM_WORLD.Set_errhandler( MPI::ERRORS_THROW_EXCEPTIONS );
-    comm = MPI::Comm::Get_parent();
-    myrank = comm.Get_rank();
-    nprocs = comm.Get_size();
+    intercomm = MPI::Comm::Get_parent();
+    myrank = intercomm.Get_rank();
+    nprocs = intercomm.Get_size();
   }
 
   ~Intercomm() {
-    comm.Disconnect();
+    intercomm.Disconnect();
     MPI::Finalize(); 
   }
 
   template <class T>
   inline void bcast( T *data, const int n=1 ) {
-    comm.Bcast( (void *)data, n * sizeof(T), MPI::BYTE, 0 );
+    intercomm.Bcast( (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
   inline void scatter( T *data, const int n=1 ) {
-    comm.Scatter( NULL, 0, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
+    intercomm.Scatter( NULL, 0, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
   inline void scatterv( T *data, const int n=1 ) {
-    comm.Scatterv( NULL, NULL, NULL, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
+    intercomm.Scatterv( NULL, NULL, NULL, MPI::BYTE, (void *)data, n * sizeof(T), MPI::BYTE, 0 );
   }
   
   template <class T>
   inline void recv( T *data, const int n=1, const int tag=0 ) {
-    comm.Recv( (void *)data, n * sizeof(T), MPI::BYTE, tag, 0 );
+    intercomm.Recv( (void *)data, n * sizeof(T), MPI::BYTE, tag, 0 );
   }
   
   template <class T>
   inline void gatherv( T *data, const int n=1 ) {
-    comm.Gatherv( (void *)data, n * sizeof(T), MPI::BYTE, NULL, NULL, NULL, MPI::BYTE, 0 );
+    intercomm.Gatherv( (void *)data, n * sizeof(T), MPI::BYTE, NULL, NULL, NULL, MPI::BYTE, 0 );
   }
   
   template <class T>
   inline void gather( T *data, const int n=1 ) {
-    comm.Gather( (void *)data, n * sizeof(T), MPI::BYTE, NULL, 0, MPI::BYTE, 0 );
+    intercomm.Gather( (void *)data, n * sizeof(T), MPI::BYTE, NULL, 0, MPI::BYTE, 0 );
   }
 
   void abort( int errorcode=1 ) {
-    comm.Abort( errorcode );
+    intercomm.Abort( errorcode );
   }
 
 public:
@@ -269,7 +288,7 @@ public:
 
 private:
 
-  MPI::Intercomm comm;
+  MPI::Intercomm intercomm;
 
 };
 
@@ -562,7 +581,7 @@ private:
     }
   }
 
-  void vector_axpy() /* logical OR vectors
+  void vector_axpy() /* self += factor * other
 
        -> broadcast HANDLE handle.{self,other}
        -> broadcast SCALAR factor
@@ -578,6 +597,23 @@ private:
     auto other_i = other->getData().begin();
     for ( auto &self_i : self->getDataNonConst() ) {
       self_i += factor * (*other_i);
+      other_i++;
+    }
+  }
+
+  void vector_imul() /* self *= other
+
+       -> broadcast HANDLE handle.{self,other}
+  */{
+
+    struct { handle_t self, other; } handle;
+    bcast( &handle );
+    auto self = objects.get<vector_t>( handle.self, out(DEBUG) );
+    auto other = objects.get<const vector_t>( handle.other, out(DEBUG) );
+    ASSERT( self->getMap() == other->getMap() );
+    auto other_i = other->getData().begin();
+    for ( auto &self_i : self->getDataNonConst() ) {
+      self_i *= *other_i;
       other_i++;
     }
   }
@@ -759,7 +795,7 @@ private:
     gather( &norm );
   }
   
-  void matrix_apply() /* matrix vector multiplication
+  void operator_apply() /* matrix vector multiplication
      
        -> broadcast HANDLE handle.{matrix,out,vector}
   */{
@@ -767,7 +803,7 @@ private:
     struct { handle_t matrix, rhs, lhs; } handle;
     bcast( &handle );
   
-    auto matrix = objects.get<crsmatrix_t>( handle.matrix, out(DEBUG) );
+    auto matrix = objects.get<operator_t>( handle.matrix, out(DEBUG) );
     auto rhs = objects.get<vector_t>( handle.rhs, out(DEBUG) );
     auto lhs = objects.get<vector_t>( handle.lhs, out(DEBUG) );
   
@@ -830,6 +866,32 @@ private:
     gatherv( all_indices.get(), all_indices.size() );
     gatherv( all_values.get(), all_values.size() );
   }
+
+  void matrix_constrained() /* matrix vector multiplication
+     
+       -> broadcast HANDLE handle.{conmat,matrix,vector}
+  */{
+  
+    struct { handle_t conmat, matrix, vector; } handle;
+    bcast( &handle );
+  
+    auto matrix = objects.get<const operator_t>( handle.matrix, out(DEBUG) );
+    auto vector = objects.get<const vector_t>( handle.vector, out(DEBUG) );
+    Teuchos::Array<local_t> con_items;
+    local_t ldof = 0;
+    for ( auto const &v : vector->getData() ) {
+      if ( ! std::isnan( v ) ) {
+        con_items.push_back( ldof );
+      }
+      ldof++;
+    }
+
+    auto node = Kokkos::DefaultNode::getDefaultNode ();
+    auto comm = Tpetra::DefaultPlatform::getDefaultPlatform().getComm();
+    auto conmat = Teuchos::rcp( new ConstrainedOperator( matrix, con_items ) );
+
+    objects.set( handle.conmat, conmat, out(DEBUG) );
+  }
   
   void vector_nan_from_supp() /* set vector items to nan for non suppored rows
      
@@ -851,26 +913,6 @@ private:
     }
   }
   
-  void vector_as_setzero_operator() /* create setzero from nan values
-     
-       -> broadcast HANDLE handle.{setzero,vector}
-  */{
-  
-    struct { handle_t setzero, vector; } handle;
-    bcast( &handle );
-  
-    auto vector = objects.get<const vector_t>( handle.vector, out(DEBUG) );
-    auto selection = Teuchos::rcp( new vector_t( vector->getMap() ) );
-
-    auto vector_i = vector->getData().begin();
-    for ( auto &selection_i : selection->getDataNonConst() ) {
-      selection_i = std::isnan( *vector_i );
-      vector_i++;
-    }
-    auto setzero = Teuchos::rcp( new SetZero(selection) );
-    objects.set( handle.setzero, setzero, out(DEBUG) );
-  }
-
   void precon_new() /* create new preconditioner
      
        -> broadcast HANDLE handle.{precon,matrix,precontype,preconparams}
