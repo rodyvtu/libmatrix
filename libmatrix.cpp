@@ -977,46 +977,27 @@ private:
     linprob->setHermitian();
   }
 
-  void linearproblem_add_left_precon() /* add left preconditioner
+  void linearproblem_set_precon() /* add left preconditioner
      
        -> broadcast HANDLE handle.{linprob,prec}
+       -> broadcast BOOL side
   */{
   
     struct { handle_t linprob, precon; } handle;
     bcast( &handle );
 
-    auto linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
-    auto precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
-    auto oldprecon = linprob->getLeftPrec();
-    if ( oldprecon.is_null() ) {
-      out(INFO) << "setting left preconditioner" << std::endl;
-    }
-    else {
-      out(INFO) << "wrapping existing left preconditioner" << std::endl;
-      precon = Teuchos::rcp<operator_t>( new ChainOperator( oldprecon, precon ) );
-    }
-    linprob->setLeftPrec( precon );
-  }
-
-  void linearproblem_add_right_precon() /* add right preconditioner
-     
-       -> broadcast HANDLE handle.{linprob,prec}
-  */{
-  
-    struct { handle_t linprob, precon; } handle;
-    bcast( &handle );
+    bool_t right;
+    bcast( &right );
 
     auto linprob = objects.get<linearproblem_t>( handle.linprob, out(DEBUG) );
     auto precon = objects.get<const operator_t>( handle.precon, out(DEBUG) );
-    auto oldprecon = linprob->getRightPrec();
-    if ( oldprecon.is_null() ) {
-      out(INFO) << "setting right preconditioner" << std::endl;
+
+    if ( right ) {
+      linprob->setRightPrec( precon );
     }
     else {
-      out(INFO) << "wrapping existing right preconditioner" << std::endl;
-      precon = Teuchos::rcp<operator_t>( new ChainOperator( precon, oldprecon ) );
+      linprob->setLeftPrec( precon );
     }
-    linprob->setRightPrec( precon );
   }
 
   void linearproblem_solve() /* solve system
