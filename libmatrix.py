@@ -191,9 +191,9 @@ class LibMatrix( InterComm ):
     self.bcast( [ self_handle, other_handle ], handle_t )
 
   @bcast_token
-  def vector_axpy( self, self_handle, other_handle, factor ):
+  def vector_update( self, self_handle, other_handle, alpha, beta ):
     self.bcast( [ self_handle, other_handle ], handle_t )
-    self.bcast( factor, scalar_t )
+    self.bcast( [ alpha, beta ], scalar_t )
 
   @bcast_token
   def matrix_new_static( self, graph_handle ):
@@ -452,6 +452,11 @@ class Vector( Object ):
   def fill( self, value ):
     self.comm.vector_fill( self.handle, value )
 
+  def __neg__( self ):
+    neg = Vector(self.map)
+    self.comm.vector_update( neg.handle, self.handle, -1, 0 )
+    return neg
+
   def __or__( self, other ):
     return Vector(self).__ior__( other )
 
@@ -463,9 +468,14 @@ class Vector( Object ):
   def __sub__( self, other ):
     return Vector(self).__isub__( other )
 
+  def __rsub__( self, other ):
+    if not other:
+      return -self
+    return self.asme( other, copy=True ).__isub__( self )
+    
   def __isub__( self, other ):
     other = self.asme( other )
-    self.comm.vector_axpy( self.handle, other.handle, -1 )
+    self.comm.vector_update( self.handle, other.handle, -1, 1 )
     return self
 
   def __add__( self, other ):
@@ -473,7 +483,7 @@ class Vector( Object ):
 
   def __iadd__( self, other ):
     other = self.asme( other )
-    self.comm.vector_axpy( self.handle, other.handle, 1 )
+    self.comm.vector_update( self.handle, other.handle, 1, 1 )
     return self
 
   def __mul__( self, other ):
@@ -484,11 +494,14 @@ class Vector( Object ):
     self.comm.vector_imul( self.handle, other.handle )
     return self
 
-  def asme( self, other ):
+  def asme( self, other, copy=False ):
     if isinstance( other, (int,float) ):
       value = other
       other = Vector( self.map )
-      other.fill( value )
+      if value:
+        other.fill( value )
+    elif copy:
+      other = Vector( other )
     assert isinstance( other, Vector )
     assert other.map == self.map
     return other
@@ -587,13 +600,11 @@ class Matrix( Operator ):
   def norm( self ):
     return self.comm.matrix_norm( self.handle )
 
-  def solve( self, rhs=None, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
+  def solve( self, rhs=0, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
     if constrain:
       assert isinstance( constrain, Vector )
       assert constrain.map == self.domainmap
       matrix = self.constrained( constrain )
-      if not rhs:
-        rhs = Vector( self.rangemap )
       rhs = constrain | ( rhs - self.apply( constrain | 0 ) )
     else:
       if not rhs:

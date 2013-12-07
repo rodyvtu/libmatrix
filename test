@@ -91,6 +91,6 @@ def test( nprocs, size ):
   print 'laplacian:', numpy.linalg.norm( numpy.diff( result, n=2 ) )
 
 try:
-  test( nprocs=4, size=100 )
+  test( nprocs=2, size=10 )
 except:
   traceback.print_exc()

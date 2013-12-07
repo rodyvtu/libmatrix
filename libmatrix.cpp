@@ -581,24 +581,19 @@ private:
     }
   }
 
-  void vector_axpy() /* self += factor * other
+  void vector_update() /* self += factor * other
 
        -> broadcast HANDLE handle.{self,other}
-       -> broadcast SCALAR factor
+       -> broadcast SCALAR factor.{alpha,beta}
   */{
 
     struct { handle_t self, other; } handle;
     bcast( &handle );
-    scalar_t factor;
-    bcast( &factor );
-    auto self = objects.get<vector_t>( handle.self, out(DEBUG) );
-    auto other = objects.get<vector_t>( handle.other, out(DEBUG) );
-    ASSERT( self->getMap() == other->getMap() );
-    auto other_i = other->getData().begin();
-    for ( auto &self_i : self->getDataNonConst() ) {
-      self_i += factor * (*other_i);
-      other_i++;
-    }
+    struct { scalar_t alpha, beta; } scalar;
+    bcast( &scalar );
+    auto self = objects.get<multivector_t>( handle.self, out(DEBUG) );
+    auto other = objects.get<const multivector_t>( handle.other, out(DEBUG) );
+    self->update( scalar.alpha, *other, scalar.beta );
   }
 
   void vector_imul() /* self *= other
