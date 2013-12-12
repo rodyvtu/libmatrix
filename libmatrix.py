@@ -581,7 +581,7 @@ class Matrix( Operator ):
     rowidx, colidx = idx
     rowlocal = self.rowmap.global2local[:,rowidx]
     collocal = self.colmap.global2local[:,colidx]
-    rank = first( ( (rowlocal!=-1) & (collocal!=-1) ).all( axis=1 ) )
+    rank = first( (rowlocal!=-1).all(axis=1) & (collocal!=-1).all(axis=1) )
     self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
 
   def complete( self ):
