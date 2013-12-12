@@ -179,8 +179,10 @@ class LibMatrix( InterComm ):
     return self.gather_equal( scalar_t )
 
   @bcast_token
-  def vector_complete( self, vector_handle, export_handle ):
-    self.bcast( [ vector_handle, export_handle ], handle_t )
+  def vector_complete( self, builder_handle, export_handle ):
+    vector_handle = self.claim_handle()
+    self.bcast( [ vector_handle, builder_handle, export_handle ], handle_t )
+    return vector_handle
 
   @bcast_token
   def vector_or( self, self_handle, other_handle ):
@@ -233,8 +235,10 @@ class LibMatrix( InterComm ):
     self.send( rank, data.ravel(), scalar_t )
 
   @bcast_token
-  def matrix_complete( self, matrix_handle, export_handle ):
-    self.bcast( [ matrix_handle, export_handle ], handle_t )
+  def matrix_complete( self, builder_handle, export_handle ):
+    matrix_handle = self.claim_handle()
+    self.bcast( [ matrix_handle, builder_handle, export_handle ], handle_t )
+    return matrix_handle
 
   @bcast_token
   def matrix_constrained( self, matrix_handle, vector_handle ):
@@ -413,6 +417,94 @@ class Map( Object ):
 
 class Vector( Object ):
 
+  def __init__( self, map, handle=None ):
+    assert isinstance( map, Map )
+    if handle is None:
+      handle = map.comm.vector_new( map.handle )
+    self.map = map
+    self.shape = map.size,
+    Object.__init__( self, map.comm, handle )
+
+  def toarray( self ):
+    assert self.map.is1to1
+    array = self.comm.vector_toarray( self.handle )
+    assert array.shape == self.shape
+    return array
+
+  def norm( self ):
+    return self.comm.vector_norm( self.handle )
+
+  def dot( self, other ):
+    assert isinstance( other, Vector )
+    assert self.shape == other.shape
+    return self.comm.vector_dot( self.handle, other.handle )
+
+  def fill( self, value ):
+    self.comm.vector_fill( self.handle, value )
+
+  def copy( self ):
+    handle = self.comm.vector_copy( self.handle )
+    return Vector( self.map, handle )
+
+  def __neg__( self ):
+    neg = Vector( self.map )
+    self.comm.vector_update( neg.handle, self.handle, -1, 0 )
+    return neg
+
+  def __or__( self, other ):
+    return self.copy().__ior__( other )
+
+  def __ior__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_or( self.handle, other.handle )
+    return self
+
+  def __sub__( self, other ):
+    return self.copy().__isub__( other )
+
+  def __rsub__( self, other ):
+    if not other:
+      return -self
+    return self.asme( other, copy=True ).__isub__( self )
+    
+  def __isub__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_update( self.handle, other.handle, -1, 1 )
+    return self
+
+  def __add__( self, other ):
+    return self.copy().__iadd__( other )
+
+  def __iadd__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_update( self.handle, other.handle, 1, 1 )
+    return self
+
+  def __mul__( self, other ):
+    return self.copy().__imul__( other )
+
+  def __imul__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_imul( self.handle, other.handle )
+    return self
+
+  def asme( self, other, copy=False ):
+    if isinstance( other, (int,float) ):
+      value = other
+      other = Vector( self.map )
+      if value:
+        other.fill( value )
+    elif copy:
+      other = other.copy()
+    assert isinstance( other, Vector )
+    assert other.map == self.map
+    return other
+
+  def nan_from_supp( self, matrix ):
+    self.comm.vector_nan_from_supp( self.handle, matrix.handle )
+
+class VectorBuilder( Object ):
+
   def __init__( self, init ):
     if isinstance( init, Map ):
       self.shape = init.size,
@@ -436,95 +528,25 @@ class Vector( Object ):
     rank = first( ( local != -1 ).all( axis=1 ) )
     self.add( rank, [local[rank]], data )
 
-  def toarray( self ):
-    assert self.map.is1to1
-    array = self.comm.vector_toarray( self.handle )
-    assert array.shape == self.shape
-    return array
-
-  def norm( self ):
-    return self.comm.vector_norm( self.handle )
-
-  def dot( self, other ):
-    assert isinstance( other, Vector )
-    assert self.shape == other.shape
-    return self.comm.vector_dot( self.handle, other.handle )
-
-  def complete( self ):
-    export = self.map.export
-    self.comm.vector_complete( self.handle, export.handle )
-    self.map = export.dstmap
-
-  def fill( self, value ):
-    self.comm.vector_fill( self.handle, value )
-
-  def __neg__( self ):
-    neg = Vector(self.map)
-    self.comm.vector_update( neg.handle, self.handle, -1, 0 )
-    return neg
-
-  def __or__( self, other ):
-    return Vector(self).__ior__( other )
-
-  def __ior__( self, other ):
-    other = self.asme( other )
-    self.comm.vector_or( self.handle, other.handle )
-    return self
-
-  def __sub__( self, other ):
-    return Vector(self).__isub__( other )
-
-  def __rsub__( self, other ):
-    if not other:
-      return -self
-    return self.asme( other, copy=True ).__isub__( self )
-    
-  def __isub__( self, other ):
-    other = self.asme( other )
-    self.comm.vector_update( self.handle, other.handle, -1, 1 )
-    return self
-
-  def __add__( self, other ):
-    return Vector(self).__iadd__( other )
-
-  def __iadd__( self, other ):
-    other = self.asme( other )
-    self.comm.vector_update( self.handle, other.handle, 1, 1 )
-    return self
-
-  def __mul__( self, other ):
-    return Vector(self).__imul__( other )
-
-  def __imul__( self, other ):
-    other = self.asme( other )
-    self.comm.vector_imul( self.handle, other.handle )
-    return self
-
-  def asme( self, other, copy=False ):
-    if isinstance( other, (int,float) ):
-      value = other
-      other = Vector( self.map )
-      if value:
-        other.fill( value )
-    elif copy:
-      other = Vector( other )
-    assert isinstance( other, Vector )
-    assert other.map == self.map
-    return other
-
-  def nan_from_supp( self, matrix ):
-    self.comm.vector_nan_from_supp( self.handle, matrix.handle )
+  def complete( self, export=None ):
+    if export is None:
+      export = self.map.export
+    assert isinstance( export, Export )
+    assert self.map == export.srcmap
+    handle = self.comm.vector_complete( self.handle, export.handle )
+    return Vector( export.dstmap, handle )
 
 
 class Operator( Object ):
 
-  def __init__( self, comm, handle, domainmap, rangemap ):
+  def __init__( self, handle, domainmap, rangemap ):
+    assert domainmap.comm == rangemap.comm
     assert isinstance( domainmap, Map )
     assert isinstance( rangemap, Map )
     self.domainmap = domainmap
     self.rangemap = rangemap
     self.shape = rangemap.size, domainmap.size
-    Object.__init__( self, comm, handle )
+    Object.__init__( self, domainmap.comm, handle )
 
   def apply( self, vec ):
     assert isinstance( vec, Vector )
@@ -542,83 +564,9 @@ class Operator( Object ):
       array[:,i] = self.apply( e ).toarray()
     return array
 
-
-class Precon( Operator ):
-
-  def __init__( self, matrix, precontype, preconparams=None ):
-    assert isinstance( matrix, Operator )
-    comm = matrix.comm
-    if not preconparams:
-      preconparams = ParameterList( comm )
-    else:
-      assert isinstance( preconparams, ParameterList )
-      assert preconparams.comm is comm
-    myhandle = comm.precon_new( matrix.handle, _precons.index(precontype), preconparams.handle )
-    Operator.__init__( self, comm, myhandle, matrix.rangemap, matrix.domainmap )
-
-
-class Matrix( Operator ):
-
-  def __init__( self, init ):
-    if isinstance( init, Graph ):
-      self.rowmap = init.rowmap
-      self.colmap = init.colmap
-      comm = init.comm
-      matrix_handle = comm.matrix_new_static( init.handle )
-    else:
-      if isinstance( init, Map ):
-        self.rowmap = self.colmap = init
-        comm = self.rowmap.comm
-      else:
-        self.rowmap, self.colmap = init
-        assert isinstance( self.rowmap, Map )
-        assert isinstance( self.colmap, Map )
-        comm = self.rowmap.comm
-        assert self.colmap.comm is comm
-      matrix_handle = comm.matrix_new_dynamic( self.rowmap.handle, self.colmap.handle )
-    self.shape = self.rowmap.size, self.colmap.size
-    domainmap = rangemap = self.rowmap.export.dstmap
-    Operator.__init__( self, comm, matrix_handle, domainmap, rangemap )
-
-  def __add__( self, other ):
-    assert isinstance( self, Matrix )
-    assert isinstance( other, Matrix )
-    assert self.shape == other.shape
-    handle = self.comm.matrix_add( self.handle, other.handle, 1, 1 )
-    return Operator( self.comm, handle, self.domainmap, self.rangemap )
-
-  def __sub__( self, other ):
-    assert isinstance( self, Matrix )
-    assert isinstance( other, Matrix )
-    assert self.shape == other.shape
-    handle = self.comm.matrix_add( self.handle, other.handle, 1, -1 )
-    return Operator( self.comm, handle, self.domainmap, self.rangemap )
-
-  def add( self, rank, idx, data ):
-    rowidx, colidx = idx
-    self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
-
-  def add_global( self, idx, data ):
-    rowidx, colidx = idx
-    rowlocal = self.rowmap.global2local[:,rowidx]
-    collocal = self.colmap.global2local[:,colidx]
-    rank = first( (rowlocal!=-1).all(axis=1) & (collocal!=-1).all(axis=1) )
-    self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
-
-  def complete( self ):
-    export = self.rowmap.export
-    assert isinstance( export, Export )
-    assert self.rowmap == export.srcmap
-    self.comm.matrix_complete( self.handle, export.handle )
-    self.rowmap = export.dstmap
-    self.colmap = None
-
   def constrained( self, selection ):
     handle = self.comm.matrix_constrained( self.handle, selection.handle )
-    return Operator( self.comm, handle, self.domainmap, self.rangemap )
-
-  def norm( self ):
-    return self.comm.matrix_norm( self.handle )
+    return Operator( handle, self.domainmap, self.rangemap )
 
   def solve( self, rhs=0, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
     if constrain:
@@ -639,11 +587,87 @@ class Matrix( Operator ):
       name = 'CG' if symmetric else 'GMRES'
     return linprob.solve( name, params )
 
+
+class Precon( Operator ):
+
+  def __init__( self, matrix, precontype, preconparams=None ):
+    assert isinstance( matrix, Operator )
+    comm = matrix.comm
+    if not preconparams:
+      preconparams = ParameterList( comm )
+    else:
+      assert isinstance( preconparams, ParameterList )
+      assert preconparams.comm is comm
+    myhandle = comm.precon_new( matrix.handle, _precons.index(precontype), preconparams.handle )
+    Operator.__init__( self, myhandle, matrix.rangemap, matrix.domainmap )
+
+
+class Matrix( Operator ):
+
+  def __add__( self, other ):
+    assert isinstance( self, Matrix )
+    assert isinstance( other, Matrix )
+    assert self.shape == other.shape
+    handle = self.comm.matrix_add( self.handle, other.handle, 1, 1 )
+    return Operator( handle, self.domainmap, self.rangemap )
+
+  def __sub__( self, other ):
+    assert isinstance( self, Matrix )
+    assert isinstance( other, Matrix )
+    assert self.shape == other.shape
+    handle = self.comm.matrix_add( self.handle, other.handle, 1, -1 )
+    return Operator( handle, self.domainmap, self.rangemap )
+
+  def norm( self ):
+    return self.comm.matrix_norm( self.handle )
+
   def toarray( self ):
-    assert self.rowmap.is1to1
     array = self.comm.matrix_toarray( self.handle )
     assert array.shape == self.shape
     return array
+
+
+class MatrixBuilder( Object ):
+
+  def __init__( self, init ):
+    if isinstance( init, Graph ):
+      self.rowmap = init.rowmap
+      self.colmap = init.colmap
+      comm = init.comm
+      matrix_handle = comm.matrix_new_static( init.handle )
+    else:
+      if isinstance( init, Map ):
+        self.rowmap = self.colmap = init
+        comm = self.rowmap.comm
+      else:
+        self.rowmap, self.colmap = init
+        assert isinstance( self.rowmap, Map )
+        assert isinstance( self.colmap, Map )
+        comm = self.rowmap.comm
+        assert self.colmap.comm is comm
+      matrix_handle = comm.matrix_new_dynamic( self.rowmap.handle, self.colmap.handle )
+    self.shape = self.rowmap.size, self.colmap.size
+    Object.__init__( self, comm, matrix_handle )
+
+  def add( self, rank, idx, data ):
+    rowidx, colidx = idx
+    self.comm.matrix_add_block( self.handle, rank, rowidx, colidx, data )
+
+  def add_global( self, idx, data ):
+    rowidx, colidx = idx
+    rowlocal = self.rowmap.global2local[:,rowidx]
+    collocal = self.colmap.global2local[:,colidx]
+    rank = first( (rowlocal!=-1).all(axis=1) & (collocal!=-1).all(axis=1) )
+    self.add( rank, ( rowlocal[rank], collocal[rank] ), data )
+
+  def complete( self, export=None ):
+    if export is None:
+      export = self.rowmap.export
+    assert isinstance( export, Export )
+    assert self.rowmap == export.srcmap
+    handle = self.comm.matrix_complete( self.handle, export.handle )
+    return Matrix( handle, export.dstmap, export.dstmap )
+
 
 class LinearProblem( Object ):
 
@@ -710,7 +734,7 @@ class Graph( Object ):
     Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
 
 
-class Scalar( numpy.ndarray ):
+class ScalarBuilder( numpy.ndarray ):
 
   def __new__( cls ):
     return numpy.array( 0. ).view( cls )
@@ -720,16 +744,16 @@ class Scalar( numpy.ndarray ):
     self[...] += value
 
   def complete( self ):
-    pass
+    return self
 
 
-def Array( shape ):
+def ArrayBuilder( shape ):
   if len( shape ) == 2:
-    return Matrix( shape )
+    return MatrixBuilder( shape )
   if len( shape ) == 1:
-    return Vector( shape[0] )
+    return VectorBuilder( shape[0] )
   assert not shape
-  return Scalar()
+  return ScalarBuilder()
 
 
 # vim:shiftwidth=2:foldmethod=indent:foldnestmax=2

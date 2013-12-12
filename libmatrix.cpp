@@ -200,14 +200,6 @@ public:
     }
   }
 
-  inline void reset( handle_t handle, Teuchos::RCP<Teuchos::Describable> object, std::ostream &out ) {
-    if ( out != blackHole ) {
-      out << "reset #" << handle << ": " << object->description() << std::endl;
-    }
-    ASSERT( handle < objects.size() );
-    objects[handle] = object;
-  }
-
   template <class T>
   inline Teuchos::RCP<T> get( handle_t handle, std::ostream &out ) {
     auto object = objects[handle];
@@ -548,19 +540,19 @@ private:
 
   void vector_complete() /* export vector
 
-       -> broadcast HANDLE handle.{vector,exporter}
+       -> broadcast HANDLE handle.{vector,builder,exporter}
   */{
 
-    struct { handle_t vector, exporter; } handle;
+    struct { handle_t vector, builder, exporter; } handle;
     bcast( &handle );
-    auto vector = objects.get<vector_t>( handle.vector, out(DEBUG) );
+    auto builder = objects.get<vector_t>( handle.builder, out(DEBUG) );
     auto exporter = objects.get<export_t>( handle.exporter, out(DEBUG) );
     auto map = exporter->getTargetMap();
 
-    auto completed_vector = Teuchos::rcp( new vector_t( map ) );
-    completed_vector->doExport( *vector, *exporter, Tpetra::ADD );
+    auto vector = Teuchos::rcp( new vector_t( map ) );
+    vector->doExport( *builder, *exporter, Tpetra::ADD );
 
-    objects.reset( handle.vector, completed_vector, out(DEBUG) );
+    objects.set( handle.vector, vector, out(DEBUG) );
   }
 
   void vector_or() /* logical OR vectors
@@ -776,23 +768,22 @@ private:
   
   void matrix_complete() /* export matrix and fill-complete
      
-       -> broadcast HANDLE handle.{matrix,exporter}
+       -> broadcast HANDLE handle.{matrix,builder,exporter}
   */{
   
-    struct { handle_t matrix, exporter; } handle;
+    struct { handle_t matrix, builder, exporter; } handle;
     bcast( &handle );
   
-    auto matrix = objects.get<const crsmatrix_t>( handle.matrix, out(DEBUG) );
+    auto builder = objects.get<const crsmatrix_t>( handle.builder, out(DEBUG) );
     auto exporter = objects.get<const export_t>( handle.exporter, out(DEBUG) );
-    auto domainmap = exporter->getTargetMap();
-    auto rangemap = exporter->getTargetMap();
+    auto targetmap = exporter->getTargetMap();
   
-    out(INFO) << "completing matrix #" << handle.matrix << std::endl;
+    out(INFO) << "completing matrix #" << handle.builder << std::endl;
   
-    auto completed_matrix = Tpetra::exportAndFillCompleteCrsMatrix( matrix, *exporter, domainmap, rangemap );
+    auto matrix = Tpetra::exportAndFillCompleteCrsMatrix( builder, *exporter, targetmap, targetmap );
     // defaults to "ADD" combine mode (reverseMode=false in Tpetra_CrsMatrix_def.hpp)
   
-    objects.reset( handle.matrix, completed_matrix, out(DEBUG) );
+    objects.set( handle.matrix, matrix, out(DEBUG) );
   }
   
   void matrix_norm() /* compute frobenius norm

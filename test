@@ -25,7 +25,7 @@ def test( nprocs, size ):
 
   v_npy = numpy.arange(1,size+1) * 10
 
-  v = libmatrix.Vector( rowmap )
+  v = libmatrix.VectorBuilder( rowmap )
 
   for i in range(size-1):
     dofs = numpy.arange(i,i+2)
@@ -33,7 +33,7 @@ def test( nprocs, size ):
     print 'adding', values, ' to ', dofs
     v.add_global( idx=[dofs], data=values )
 
-  v.complete()
+  v = v.complete()
 
   v_npy[0] /= 2
   v_npy[-1] /= 2
@@ -48,12 +48,12 @@ def test( nprocs, size ):
   print 'resulting norm:', norm
   print 'reference norm:', numpy.linalg.norm( v_npy )
 
-  A = libmatrix.Matrix( rowmap )
+  A = libmatrix.MatrixBuilder( rowmap )
   for i in range(size-1):
     idx = numpy.arange(i,i+2)
     print 'adding block to ', idx
     A.add_global( idx=[idx,idx], data=block )
-  A.complete()
+  A = A.complete()
 
   A_npy = numpy.eye(size,size) * 2 - numpy.eye(size,size,1) - numpy.eye(size,size,-1)
   A_npy[0,0] = A_npy[-1,-1] = 1
@@ -71,14 +71,14 @@ def test( nprocs, size ):
   print 'reconstructed norm:', numpy.sqrt( ( B**2 ).sum() )
   print 'reference norm:', numpy.sqrt( ( A_npy**2 ).sum() )
 
-  rhs = libmatrix.Vector( rowmap )
+  rhs = libmatrix.VectorBuilder( rowmap )
   rhs.add_global( [[0]], [5] )
   rhs.add_global( [[-1]], [6] )
-  rhs.complete()
-  AA = libmatrix.Matrix( rowmap )
+  rhs = rhs.complete()
+  AA = libmatrix.MatrixBuilder( rowmap )
   AA.add_global( idx=[[0],[0]], data=[[1]] )
   AA.add_global( idx=[[-1],[-1]], data=[[1]] )
-  AA.complete()
+  AA = AA.complete()
 
   cons = AA.solve( rhs, symmetric=True )
   cons.nan_from_supp( AA )
