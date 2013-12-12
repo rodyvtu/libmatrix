@@ -65,6 +65,7 @@ typedef Tpetra::Map<local_t,global_t,node_t> map_t;
 typedef Tpetra::Vector<scalar_t,local_t,global_t,node_t> vector_t;
 typedef Tpetra::Operator<scalar_t,local_t,global_t,node_t> operator_t;
 typedef Tpetra::MultiVector<scalar_t,local_t,global_t,node_t> multivector_t;
+typedef Tpetra::RowMatrix<scalar_t,local_t,global_t,node_t> rowmatrix_t;
 typedef Tpetra::CrsMatrix<scalar_t,local_t,global_t,node_t> crsmatrix_t;
 typedef Tpetra::CrsGraph<local_t,global_t,node_t> crsgraph_t;
 typedef Tpetra::RowGraph<local_t,global_t,node_t> rowgraph_t;
@@ -752,6 +753,25 @@ private:
         mat->sumIntoLocalValues( irow, this_colidx.view(0,nold), this_data.view(0,nold) );
       }
     }
+  }
+
+  void matrix_add() /* add matrix to matrix
+     
+       -> broadcast HANDLE handle.{self,other}
+       -> broadcast SCALAR scalar.{alpha.beta}
+  */{
+  
+    struct { handle_t sum, mat1, mat2; } handle;
+    bcast( &handle );
+
+    struct { scalar_t alpha, beta; } scalar;
+    bcast( &scalar );
+
+    auto mat1 = objects.get<const rowmatrix_t>( handle.mat1, out(DEBUG) );
+    auto mat2 = objects.get<const rowmatrix_t>( handle.mat2, out(DEBUG) );
+    auto sum = mat1->add( scalar.alpha, *mat2, scalar.beta );
+
+    objects.set( handle.sum, sum, out(DEBUG) );
   }
   
   void matrix_complete() /* export matrix and fill-complete

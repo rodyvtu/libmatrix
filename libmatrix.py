@@ -214,6 +214,13 @@ class LibMatrix( InterComm ):
     return precon_handle
 
   @bcast_token
+  def matrix_add( self, mat1_handle, mat2_handle, alpha, beta ):
+    sum_handle = self.claim_handle()
+    self.bcast( [ sum_handle, mat1_handle, mat2_handle ], handle_t )
+    self.bcast( [ alpha, beta ], scalar_t )
+    return sum_handle
+
+  @bcast_token
   def matrix_add_block( self, handle, rank, rowidx, colidx, data ):
     data = numpy.asarray(data)
     shape = len(rowidx), len(colidx)
@@ -572,6 +579,20 @@ class Matrix( Operator ):
     self.shape = self.rowmap.size, self.colmap.size
     domainmap = rangemap = self.rowmap.export.dstmap
     Operator.__init__( self, comm, matrix_handle, domainmap, rangemap )
+
+  def __add__( self, other ):
+    assert isinstance( self, Matrix )
+    assert isinstance( other, Matrix )
+    assert self.shape == other.shape
+    handle = self.comm.matrix_add( self.handle, other.handle, 1, 1 )
+    return Operator( self.comm, handle, self.domainmap, self.rangemap )
+
+  def __sub__( self, other ):
+    assert isinstance( self, Matrix )
+    assert isinstance( other, Matrix )
+    assert self.shape == other.shape
+    handle = self.comm.matrix_add( self.handle, other.handle, 1, -1 )
+    return Operator( self.comm, handle, self.domainmap, self.rangemap )
 
   def add( self, rank, idx, data ):
     rowidx, colidx = idx
