@@ -348,6 +348,7 @@ class Map( Object ):
         assert used.shape[1] == size
       else:
         size = used.shape[1]
+      used = used.copy()
     else:
       indices = used
       assert len(indices) == comm.nprocs
@@ -356,6 +357,7 @@ class Map( Object ):
       for iproc, idx in enumerate( indices ):
         used[ iproc, idx ] = True
 
+    self.used = used
     self.owned = self.__distribute( used )
     self.local2global = []
     self.is1to1 = True
