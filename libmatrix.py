@@ -609,7 +609,7 @@ class Matrix( Operator ):
     assert isinstance( other, Matrix )
     assert self.shape == other.shape
     handle = self.comm.matrix_add( self.handle, other.handle, 1, 1 )
-    return Operator( handle, self.domainmap, self.rangemap )
+    return Matrix( handle, self.domainmap, self.rangemap )
 
   def __sub__( self, other ):
     assert isinstance( self, Matrix )
