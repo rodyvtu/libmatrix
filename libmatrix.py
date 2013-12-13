@@ -568,7 +568,7 @@ class Operator( Object ):
     handle = self.comm.matrix_constrained( self.handle, selection.handle )
     return Operator( handle, self.domainmap, self.rangemap )
 
-  def solve( self, rhs=0, lhs=None, precon=None, name=None, symmetric=False, params=None, constrain=None ):
+  def linearproblem( self, rhs=0, lhs=None, constrain=None ):
     if constrain:
       assert isinstance( constrain, Vector )
       assert constrain.map == self.domainmap
@@ -578,7 +578,10 @@ class Operator( Object ):
       if not rhs:
         return Vector( self.domainmap )
       matrix = self
-    linprob = LinearProblem( matrix, rhs, lhs )
+    return LinearProblem( matrix, rhs, lhs )
+
+  def solve( self, rhs=0, lhs=None, constrain=None, precon=None, name=None, symmetric=False, params=None ):
+    linprob = self.linearproblem( rhs, lhs, constrain )
     if symmetric:
       linprob.set_hermitian()
     if precon:
@@ -708,6 +711,9 @@ class LinearProblem( Object ):
     solver_handle = _solvers.index( name )
     self.comm.linearproblem_solve( self.handle, params.handle, solver_handle )
     return self.lhs
+
+  def res( self ):
+    return ( self.rhs - self.matrix.apply( self.lhs ) ).norm()
 
 
 class Export( Object ):
