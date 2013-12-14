@@ -37,28 +37,6 @@ def where( array ):
 def first( array ):
   return where( array )[0]
 
-def bcast_token_template( template_var_arg ):
-  def bcast_token( func ):
-    int_token = _functions.index( func.func_name + '<number_t>' )
-    float_token = _functions.index( func.func_name + '<scalar_t>' )
-    def wrapped( self, *args ):
-      assert self.isconnected(), 'connection is closed'
-      template_arg = args[template_var_arg]
-      if isinstance( template_arg, int ):
-        token = int_token
-        dtype = number_t
-      elif isinstance( template_arg, float ):
-        token = float_token
-        dtype = scalar_t
-      else:
-        raise Exception, 'invalid argument for function %r: %r' % ( func.func_name, template_arg )
-      template_arg = numpy.asarray( template_arg, dtype=dtype )
-      self.bcast( token, token_t )
-      args = args[:template_var_arg] + (template_arg,) + args[template_var_arg+1:]
-      return func( self, *args )
-    return wrapped    
-  return bcast_token 
-
 def bcast_token( func ):
   token = _functions.index( func.func_name )
   def wrapped( self, *args, **kwargs ):
@@ -113,12 +91,11 @@ class LibMatrix( InterComm ):
     self.bcast( params_handle, handle_t )
     return params_handle
 
-  @bcast_token_template( 2 )
-  def params_set( self, handle, key, value ):
+  @bcast_token
+  def params_update( self, handle, xml ):
     self.bcast( handle, handle_t )
-    self.bcast( len(key), size_t )
-    self.bcast( key, char_t )
-    self.bcast( value )
+    self.bcast( len(xml), size_t )
+    self.bcast( xml, char_t )
 
   @bcast_token
   def params_print( self, handle ):
@@ -337,13 +314,34 @@ class ParameterList( Object ):
     self.items = {}
     Object.__init__( self, comm, comm.params_new() )
 
+  #<ParameterList name="ANONYMOUS">
+  #  <Parameter docString="" id="0" isDefault="false" isUsed="true" name="foo" type="double" value="1.00000000000000000e+00"/>
+  #  <Parameter docString="" id="1" isDefault="false" isUsed="true" name="bar" type="int" value="2"/>
+  #  <Validators/>
+  #</ParameterList>
+
+  @staticmethod
+  def toxml( items ):
+    s = '<ParameterList>\n'
+    for key, value in items.items():
+      if isinstance( value, int ):
+        dtype = 'int'
+      elif isinstance( value, float ):
+        dtype = 'double'
+      else:
+        raise Exception, 'invalid value %r' % value
+      s += '<Parameter isUsed="true" name="%s" type="%s" value="%s"/>\n' % ( key, dtype, value )
+    s += '</ParameterList>'
+    return s
+
   def cprint ( self ):
     self.comm.params_print( self.handle )
 
   def __setitem__( self, key, value ):
     assert isinstance( key, str ), 'Expected first argument to be a string'
-    self.comm.params_set( self.handle, key, value )
     self.items[ key ] = value
+    xml = self.toxml({ key: value })
+    self.comm.params_update( self.handle, xml )
 
   def __str__( self ):
     return 'ParameterList( %s )' % ', '.join( '%s=%s' % item for item in self.items.items() )

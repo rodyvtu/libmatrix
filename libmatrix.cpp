@@ -6,6 +6,7 @@
 #include <BelosTpetraAdapter.hpp>
 #include <BelosSolverFactory.hpp>
 
+#include <Teuchos_XMLParameterListCoreHelpers.hpp>
 #include <Teuchos_GlobalMPISession.hpp>
 #include <Teuchos_oblackholestream.hpp>
 #include <Teuchos_DefaultMpiComm.hpp>
@@ -334,13 +335,11 @@ private:
   
   }
   
-  template <class T>
-  void params_set() /* set new integer in parameter list
+  void params_update() /* update parameter list from xml
      
       -> broadcast HANDLE params_handle 
-      -> broadcast SIZE length_of_key
-      -> broadcast CHAR key[length_of_key]
-      -> broadcast TEMLATE_ARG value
+      -> broadcast SIZE nchar
+      -> broadcast CHAR xml[nchar]
   */{
   
     struct { handle_t params; } handle;
@@ -349,14 +348,11 @@ private:
     size_t nchar;
     bcast( &nchar );
   
-    std::string key( nchar, 0 );
-    bcast( const_cast<char*>(key.data()), nchar );
-  
-    T value;
-    bcast( &value );
-  
+    std::string xml( nchar, 0 );
+    bcast( const_cast<char*>(xml.data()), nchar );
+
     auto params = objects.get<params_t>( handle.params, out(DEBUG) );
-    params->set( key, value );
+    Teuchos::updateParametersFromXmlString( xml, params.ptr() );
   }
   
   void params_print() /* print the params list (c-sided)
@@ -988,7 +984,7 @@ private:
     linprob->setHermitian();
   }
 
-  void linearproblem_set_precon() /* add left preconditioner
+  void linearproblem_set_precon() /* set left/right preconditioner
      
        -> broadcast HANDLE handle.{linprob,prec}
        -> broadcast BOOL side

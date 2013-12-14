@@ -15,7 +15,13 @@ def test( nprocs, size ):
     print '  proc %d:' % iproc, dofs
 
   comm = libmatrix.LibMatrix( nprocs=nprocs )
-  comm.set_verbosity( 2 )
+  comm.set_verbosity( 9 )
+
+  params = libmatrix.ParameterList( comm )
+  params['foo'] = 1
+  params['bar'] = 2
+  params.cprint()
+
   rowmap = libmatrix.Map( comm, rowdofmap, size ) # overlapping
   print 'used:', rowmap.local2global
 
