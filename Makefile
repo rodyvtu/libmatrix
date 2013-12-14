@@ -1,19 +1,13 @@
-FUNCTIONS := \
-	params_new params_print params_update \
-	matrix_new_static matrix_new_dynamic matrix_add_block matrix_complete matrix_norm matrix_toarray matrix_add \
-	vector_new vector_fill vector_add_block vector_toarray vector_dot vector_norm vector_complete vector_or vector_copy vector_update vector_nan_from_supp vector_imul \
-	linearproblem_new linearproblem_set_hermitian linearproblem_set_precon linearproblem_solve \
-	map_new graph_new precon_new export_new release set_verbosity \
-	operator_apply matrix_constrained
+LIBMATRIX_METHODS := $(shell grep -Po '(?<=^  void ).*(?=\(\))' libmatrix.cpp)
 
 null :=
 space := $(null) #
 comma := ,
-macros := \
-	-DFUNCNAMES='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),"$(token)"))' \
-	-DFUNCS='$(subst $(space),$(comma) ,$(foreach token,$(FUNCTIONS),&LibMatrix::$(token)))'
 
-USER_CXX_FLAGS=-std=c++11 $(macros)
+USER_CXX_FLAGS := \
+	-std=c++11 \
+	-DFUNCNAMES='$(subst $(space),$(comma) ,$(foreach token,$(LIBMATRIX_METHODS),"$(token)"))' \
+	-DFUNCS='$(subst $(space),$(comma) ,$(foreach token,$(LIBMATRIX_METHODS),&LibMatrix::$(token)))'
 
 include $(TRILINOSPATH)/include/Makefile.export.Trilinos
 
