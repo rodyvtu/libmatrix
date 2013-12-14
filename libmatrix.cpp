@@ -364,7 +364,7 @@ private:
     bcast( &handle );
   
     auto params = objects.get<params_t>( handle.params, out(DEBUG) );
-    params->print( out(DEBUG) );
+    params->print( out(INFO) );
   }
   
   void release() /* release object
