@@ -570,6 +570,25 @@ private:
     }
   }
 
+  void vector_and() /* logical AND vectors
+
+       -> broadcast HANDLE handle.{self,other}
+  */{
+
+    struct { handle_t self, other; } handle;
+    bcast( &handle );
+    auto self = objects.get<vector_t>( handle.self, out(DEBUG) );
+    auto other = objects.get<vector_t>( handle.other, out(DEBUG) );
+    ASSERT( self->getMap() == other->getMap() );
+    auto other_i = other->getData().begin();
+    for ( auto &self_i : self->getDataNonConst() ) {
+      if ( !std::isnan( self_i ) ) {
+        self_i = *other_i;
+      }
+      other_i++;
+    }
+  }
+
   void vector_update() /* self += factor * other
 
        -> broadcast HANDLE handle.{self,other}

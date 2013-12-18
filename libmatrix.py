@@ -166,6 +166,10 @@ class LibMatrix( InterComm ):
     self.bcast( [ self_handle, other_handle ], handle_t )
 
   @bcast_token
+  def vector_and( self, self_handle, other_handle ):
+    self.bcast( [ self_handle, other_handle ], handle_t )
+
+  @bcast_token
   def vector_imul( self, self_handle, other_handle ):
     self.bcast( [ self_handle, other_handle ], handle_t )
 
@@ -455,6 +459,14 @@ class Vector( Object ):
   def __ior__( self, other ):
     other = self.asme( other )
     self.comm.vector_or( self.handle, other.handle )
+    return self
+
+  def __and__( self, other ):
+    return self.copy().__iand__( other )
+
+  def __iand__( self, other ):
+    other = self.asme( other )
+    self.comm.vector_and( self.handle, other.handle )
     return self
 
   def __sub__( self, other ):
