@@ -503,7 +503,7 @@ private:
     vec->putScalar( value );
   }
   
-  void vector_dot() /* compute frobenius norm
+  void vector_dot() /* innerproduct of two vectors
      
        -> broadcast HANDLE handle.{vector1,vector2}
       <-  gather SCALAR norm
@@ -519,7 +519,7 @@ private:
     gather( &dot );
   }
   
-  void vector_norm() /* compute frobenius norm
+  void vector_norm() /* compute L2-norm
      
        -> broadcast HANDLE handle.vector
       <-  gather SCALAR norm
@@ -532,6 +532,24 @@ private:
     scalar_t norm = vector->norm2();
   
     gather( &norm );
+  }
+  
+  void vector_sum() /* compute the sum of a vector
+     
+       -> broadcast HANDLE handle.vector
+      <-  gather SCALAR sum
+  */{
+  
+    struct { handle_t vector; } handle;
+    bcast( &handle );
+    auto vector = objects.get<vector_t>( handle.vector, out(DEBUG) );
+
+    scalar_t sum = 0.;
+    for ( auto const &self_i : vector->getData() ) {
+      sum+=self_i;
+    }
+  
+    gather( &sum );
   }
 
   void vector_complete() /* export vector

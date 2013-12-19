@@ -151,6 +151,11 @@ class LibMatrix( InterComm ):
     return self.gather_equal( scalar_t )
 
   @bcast_token
+  def vector_sum( self, handle ):
+    self.bcast( handle, handle_t )
+    return self.gather( scalar_t ).sum()
+
+  @bcast_token
   def vector_dot( self, handle1, handle2 ):
     self.bcast( [ handle1, handle2 ], handle_t )
     return self.gather_equal( scalar_t )
@@ -435,6 +440,9 @@ class Vector( Object ):
 
   def norm( self ):
     return self.comm.vector_norm( self.handle )
+
+  def sum( self ):
+    return self.comm.vector_sum( self.handle )
 
   def dot( self, other ):
     assert isinstance( other, Vector )
