@@ -49,6 +49,9 @@ def test( nprocs, size ):
   print 'resulting vector:', v.toarray()
   print 'reference vector:', v_npy
 
+  print 'resulting sum v =', v.sum()
+  print 'reference sum v =', v_npy.sum()
+
   norm = v.norm()
 
   print 'resulting norm:', norm

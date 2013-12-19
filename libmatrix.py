@@ -151,6 +151,11 @@ class LibMatrix( InterComm ):
     return self.gather_equal( scalar_t )
 
   @bcast_token
+  def vector_sum( self, handle ):
+    self.bcast( handle, handle_t )
+    return self.gather( scalar_t ).sum()
+
+  @bcast_token
   def vector_dot( self, handle1, handle2 ):
     self.bcast( [ handle1, handle2 ], handle_t )
     return self.gather_equal( scalar_t )
@@ -436,6 +441,9 @@ class Vector( Object ):
   def norm( self ):
     return self.comm.vector_norm( self.handle )
 
+  def sum( self ):
+    return self.comm.vector_sum( self.handle )
+
   def dot( self, other ):
     assert isinstance( other, Vector )
     assert self.shape == other.shape
@@ -485,6 +493,8 @@ class Vector( Object ):
   def __add__( self, other ):
     return self.copy().__iadd__( other )
 
+  __radd__ = __add__
+
   def __iadd__( self, other ):
     other = self.asme( other )
     self.comm.vector_update( self.handle, other.handle, 1, 1 )
@@ -493,13 +503,15 @@ class Vector( Object ):
   def __mul__( self, other ):
     return self.copy().__imul__( other )
 
+  __rmul__ = __mul__
+
   def __imul__( self, other ):
     other = self.asme( other )
     self.comm.vector_imul( self.handle, other.handle )
     return self
 
   def asme( self, other, copy=False ):
-    if isinstance( other, (int,float) ):
+    if isinstance( other, (int,float,numpy.ndarray) ):
       value = other
       other = Vector( self.map )
       if value:
@@ -750,18 +762,17 @@ class Graph( Object ):
     Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
 
 
-class ScalarBuilder( numpy.ndarray ):
+class ScalarBuilder( object ):
 
-  def __new__( cls ):
-    return numpy.array( 0. ).view( cls )
+  def __init__( self ):
+    self.value = 0.
 
   def add_global( self, index, value ):
     assert not index
-    self[...] += value
+    self.value += value
 
   def complete( self ):
-    return self
-
+    return self.value
 
 def ArrayBuilder( shape ):
   if len( shape ) == 2:
