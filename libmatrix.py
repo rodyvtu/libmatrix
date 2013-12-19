@@ -493,6 +493,8 @@ class Vector( Object ):
   def __add__( self, other ):
     return self.copy().__iadd__( other )
 
+  __radd__ = __add__
+
   def __iadd__( self, other ):
     other = self.asme( other )
     self.comm.vector_update( self.handle, other.handle, 1, 1 )
@@ -501,13 +503,15 @@ class Vector( Object ):
   def __mul__( self, other ):
     return self.copy().__imul__( other )
 
+  __rmul__ = __mul__
+
   def __imul__( self, other ):
     other = self.asme( other )
     self.comm.vector_imul( self.handle, other.handle )
     return self
 
   def asme( self, other, copy=False ):
-    if isinstance( other, (int,float) ):
+    if isinstance( other, (int,float,numpy.ndarray) ):
       value = other
       other = Vector( self.map )
       if value:
@@ -758,18 +762,17 @@ class Graph( Object ):
     Object.__init__( self, comm, comm.graph_new( rowmap.handle, colmap.handle, rows ) )
 
 
-class ScalarBuilder( numpy.ndarray ):
+class ScalarBuilder( object ):
 
-  def __new__( cls ):
-    return numpy.array( 0. ).view( cls )
+  def __init__( self ):
+    self.value = 0.
 
   def add_global( self, index, value ):
     assert not index
-    self[...] += value
+    self.value += value
 
   def complete( self ):
-    return self
-
+    return self.value
 
 def ArrayBuilder( shape ):
   if len( shape ) == 2:
