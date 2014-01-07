@@ -11,7 +11,7 @@ Trilinos-based matrix backend. In development.
     is. This can be done by adding the following line to
     ``.bashrc``:
 
-        TRILINOSPATH="$HOME/Computer/trilinos"
+        export TRILINOSPATH="$HOME/Computer/trilinos"
 
         export CPATH="$TRILINOSPATH/include:$CPATH"
         export C_INCLUDE_PATH="$TRILINOSPATH/include:$C_INCLUDE_PATH"
