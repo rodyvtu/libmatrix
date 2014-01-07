@@ -25,5 +25,5 @@ Trilinos-based matrix backend. In development.
  5. Type ``make`` to start compiling libmatrix
  6. Install ``mpi4py`` using ``sudo pip install mpi4py``
 
-     >  If you don't have ``pip`` installed, you can install it on Debian
-     >  based systems using ``sudo apt-get install python-pip``
+    If you don't have ``pip`` installed, you can install it on Debian
+    based systems using ``sudo apt-get install python-pip``
